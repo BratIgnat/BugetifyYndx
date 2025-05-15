@@ -6,8 +6,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 from speechkit import recognize_ogg
 from excel_writer import write_to_excel
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-YANDEX_IAM_TOKEN = os.getenv("YANDEX_IAM_TOKEN")
+BOT_TOKEN = os.getenv("7621914998:AAFgJ2oQWs5BnX3PdCyqYDQUz4wVmq46Cqs")
+YANDEX_IAM_TOKEN = os.getenv("y0__xCwze6jBRjB3RMg87n1kRMCcNMWjN7PrhtHmWk7yguUOJTdJg")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Отправь голосовое с суммой и категорией. Например: '500 продукты'")
