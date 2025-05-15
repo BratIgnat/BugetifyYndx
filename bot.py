@@ -6,8 +6,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 from speechkit import recognize_ogg
 from excel_writer import write_to_excel
 
-print(">>> BOT_TOKEN is:", BOT_TOKEN)
-print(">>> YANDEX_IAM_TOKEN is:", YANDEX_IAM_TOKEN)
+
 
 
 BOT_TOKEN = "7621914998:AAFgJ2oQWs5BnX3PdCyqYDQUz4wVmq46Cqs"
