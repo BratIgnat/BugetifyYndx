@@ -22,7 +22,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_path = tmp.name
     await file.download_to_drive(file_path)
 
-    text = recognize_ogg(file_path, YANDEX_IAM_TOKEN)
+    text = recognize_ogg(file_path, YANDEX_API_KEY)
     os.remove(file_path)
 
     if not text:
