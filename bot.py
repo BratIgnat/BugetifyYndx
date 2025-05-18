@@ -133,6 +133,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = get_oauth_url()
+     print("DEBUG OAuth URL:", url)    # <----- ДОБАВЬ ЭТО!
     await update.message.reply_text(LOGIN_MSG.format(url=url), parse_mode="Markdown")
     return WAITING_OAUTH_CODE
 
