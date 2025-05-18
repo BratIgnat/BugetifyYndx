@@ -1,3 +1,5 @@
+print("====== ЭТО ТОЧНО МОЙ ФАЙЛ! ======")
+
 import os
 import logging
 import requests
