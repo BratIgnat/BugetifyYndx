@@ -12,7 +12,7 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 
 # --- КОСТЫЛЬ: жёстко укажи client_id для OAuth Яндекс.Диска ---
 # !! Временно: подставь свой актуальный client_id вместо 'ВАШ_CLIENT_ID'
-YANDEX_CLIENT_ID = "ВАШ_CLIENT_ID"
+YANDEX_CLIENT_ID = "644cc9ff80d54de8bea23a6e5b6d13e4"
 YANDEX_CLIENT_SECRET = os.getenv('YANDEX_CLIENT_SECRET')
 
 logging.basicConfig(level=logging.INFO)
