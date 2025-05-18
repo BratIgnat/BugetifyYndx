@@ -8,30 +8,23 @@ from telegram.ext import (
 )
 from speechkit import recognize_ogg
 
-# ───── Загрузка переменных окружения ─────
 load_dotenv()
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-YANDEX_IAM_TOKEN = os.getenv('YANDEX_IAM_TOKEN')  # для SpeechKit
-YANDEX_CLIENT_ID = os.getenv('YANDEX_CLIENT_ID')  # OAuth клиента для Диска
+YANDEX_API_KEY = os.getenv('YANDEX_API_KEY')  # <-- для SpeechKit (НЕ IAM!)
+YANDEX_CLIENT_ID = os.getenv('YANDEX_CLIENT_ID')
 YANDEX_CLIENT_SECRET = os.getenv('YANDEX_CLIENT_SECRET')
 
 logging.basicConfig(level=logging.INFO)
 
-# ───── Статусы для диалогов ─────
 WAITING_OAUTH_CODE = 1
-
-# ───── ВРЕМЕННО: Храним токены пользователей тут (лучше — БД!) ─────
 user_tokens = {}
-user_files = {}
 
-# ───── Шаблоны сообщений ─────
 WELCOME = (
     "👋 Привет! Я Budgetify — твой ассистент по учёту расходов.\n\n"
     "Отправь мне голосовое сообщение с тратой, например:\n"
     "`250 метро`\nили\n`127 рублей 25 копеек шоколадка`.\n\n"
     "❗ Чтобы сохранять расходы в Яндекс.Диск, нужно авторизоваться: /login"
 )
-
 HELP = (
     "📝 *Справка по командам:*\n"
     "/start — приветствие\n"
@@ -40,20 +33,17 @@ HELP = (
     "/last — последние расходы\n"
     "/help — помощь"
 )
-
 LOGIN_MSG = (
     "🔑 Для работы с Яндекс.Диском, пожалуйста, авторизуйтесь:\n\n"
     "1. Перейдите по ссылке: {url}\n"
     "2. Скопируйте код авторизации\n"
     "3. Отправьте мне этот код"
 )
-
 SUCCESS_LOGIN = "✅ Готово! Я могу сохранять ваши расходы на ваш Яндекс.Диск."
 NEED_LOGIN = "⚠️ Для этой операции нужна авторизация через Яндекс. Введите команду /login"
 ADDED_ROW = "✅ Записал: *{amount}* — {category}\n📊 Всё хранится на вашем Яндекс.Диске."
 EXCEL_LINK_MSG = "🗂 Вот ссылка на вашу таблицу: {link}"
 
-# ───── OAuth URL для Яндекс Диска ─────
 def get_oauth_url():
     return (
         f"https://oauth.yandex.ru/authorize?"
@@ -69,15 +59,15 @@ def exchange_code_for_token(code):
         "client_id": YANDEX_CLIENT_ID,
         "client_secret": YANDEX_CLIENT_SECRET,
     }
-    response = requests.post(url, data=data)
-    if response.status_code == 200:
+    try:
+        response = requests.post(url, data=data)
+        response.raise_for_status()
         return response.json()['access_token']
-    else:
-        logging.error(f"OAuth error: {response.text}")
+    except Exception as e:
+        logging.error(f"OAuth error: {e} / {response.text if 'response' in locals() else ''}")
         return None
 
 def get_file_link(user_id, token):
-    """Получить ссылку на файл user's expenses на Диске."""
     file_path = f"app:/Budgetify_{user_id}.csv"
     url = f"https://cloud-api.yandex.net/v1/disk/resources/download?path={file_path}"
     headers = {"Authorization": f"OAuth {token}"}
@@ -87,7 +77,6 @@ def get_file_link(user_id, token):
     return None
 
 def append_row_to_disk(user_id, token, row):
-    """Добавить строку в csv-файл пользователя на Яндекс.Диске."""
     file_path = f"Budgetify_{user_id}.csv"
     # Скачиваем существующий файл (если есть)
     url = f"https://cloud-api.yandex.net/v1/disk/resources/download?path=app:/{file_path}"
@@ -112,8 +101,6 @@ def append_row_to_disk(user_id, token, row):
         return True
     return False
 
-# ───── Парсинг текста ─────
-
 def parse_text(text):
     import re
     text = text.replace(",", ".")
@@ -134,8 +121,6 @@ def parse_text(text):
         except:
             continue
     raise ValueError("Не удалось найти сумму!")
-
-# ───── Команды бота ─────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(WELCOME, parse_mode="Markdown")
@@ -179,14 +164,12 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(NEED_LOGIN)
         return
 
-    # 1. Скачиваем голосовое
     file = await context.bot.get_file(update.message.voice.file_id)
     file_path = f"voice_{update.message.message_id}.ogg"
     await file.download_to_drive(file_path)
 
-    # 2. Распознаём через SpeechKit (IAM токен)
     try:
-        text = recognize_ogg(file_path, YANDEX_IAM_TOKEN)
+        text = recognize_ogg(file_path, YANDEX_API_KEY)
         amount, category = parse_text(text)
         row = [amount, category]
         append_row_to_disk(user_id, token, row)
@@ -203,10 +186,7 @@ async def last(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not token:
         await update.message.reply_text(NEED_LOGIN)
         return
-    # Тут можно реализовать просмотр последних записей из csv на Диске
     await update.message.reply_text("⏳ Эта команда в разработке.")
-
-# ───── MAIN ─────
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
