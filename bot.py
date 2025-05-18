@@ -46,12 +46,14 @@ ADDED_ROW = "✅ Записал: *{amount}* — {category}\n📊 Всё хран
 EXCEL_LINK_MSG = "🗂 Вот ссылка на вашу таблицу: {link}"
 
 def get_oauth_url():
-    print("DEBUG: YANDEX_CLIENT_ID =", YANDEX_CLIENT_ID)
-    return (
+    url = (
         f"https://oauth.yandex.ru/authorize?"
         f"response_type=code&client_id={YANDEX_CLIENT_ID}&"
         f"scope=cloud_api:disk.app_folder"
     )
+    print(f"\n==== ОТПРАВЛЯЮ ЭТУ ССЫЛКУ ПОЛЬЗОВАТЕЛЮ ====\n{url}\n===============================\n")
+    return url
+
 
 def exchange_code_for_token(code):
     url = "https://oauth.yandex.ru/token"
