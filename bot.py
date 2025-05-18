@@ -1,187 +1,230 @@
 import os
 import logging
-from datetime import datetime, date
+import requests
 from dotenv import load_dotenv
-from telegram import Update, InputFile
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-from openpyxl import Workbook, load_workbook
+from telegram import Update
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler
+)
+from speechkit import recognize_ogg
 
-from speechkit import recognize_ogg  # функция распознавания
-
-# ─────────── Загрузка переменных окружения ───────────
-
+# ───── Загрузка переменных окружения ─────
 load_dotenv()
-BOT_TOKEN      = os.getenv("BOT_TOKEN")
-YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+YANDEX_IAM_TOKEN = os.getenv('YANDEX_IAM_TOKEN')  # для SpeechKit
+YANDEX_CLIENT_ID = os.getenv('YANDEX_CLIENT_ID')  # OAuth клиента для Диска
+YANDEX_CLIENT_SECRET = os.getenv('YANDEX_CLIENT_SECRET')
 
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN не задан в .env")
-if not YANDEX_API_KEY:
-    raise RuntimeError("YANDEX_API_KEY не задан в .env")
+logging.basicConfig(level=logging.INFO)
 
-logging.basicConfig(level=logging.WARNING)  # Убираем лишние логи
-logger = logging.getLogger(__name__)
+# ───── Статусы для диалогов ─────
+WAITING_OAUTH_CODE = 1
 
-# ─────────── Работа с Excel (индивидуальные файлы) ───────────
+# ───── ВРЕМЕННО: Храним токены пользователей тут (лучше — БД!) ─────
+user_tokens = {}
+user_files = {}
 
-def get_user_excel_file(user_id):
-    return f"expenses_{user_id}.xlsx"
+# ───── Шаблоны сообщений ─────
+WELCOME = (
+    "👋 Привет! Я Budgetify — твой ассистент по учёту расходов.\n\n"
+    "Отправь мне голосовое сообщение с тратой, например:\n"
+    "`250 метро`\nили\n`127 рублей 25 копеек шоколадка`.\n\n"
+    "❗ Чтобы сохранять расходы в Яндекс.Диск, нужно авторизоваться: /login"
+)
 
-def init_excel_file(excel_file):
-    if not os.path.exists(excel_file):
-        wb = Workbook()
-        ws = wb.active
-        ws.append(["Дата", "Сумма", "Категория", "Источник", "Позиции"])
-        wb.save(excel_file)
+HELP = (
+    "📝 *Справка по командам:*\n"
+    "/start — приветствие\n"
+    "/login — подключить Яндекс.Диск\n"
+    "/excel — получить ссылку на свою таблицу\n"
+    "/last — последние расходы\n"
+    "/help — помощь"
+)
 
-def append_to_excel(user_id, amount, category, source="Голос", items="-"):
-    excel_file = get_user_excel_file(user_id)
-    init_excel_file(excel_file)
-    wb = load_workbook(excel_file)
-    ws = wb.active
-    ws.append([
-        datetime.now().strftime("%Y-%m-%d %H:%M"),
-        amount,
-        category,
-        source,
-        items
-    ])
-    wb.save(excel_file)
+LOGIN_MSG = (
+    "🔑 Для работы с Яндекс.Диском, пожалуйста, авторизуйтесь:\n\n"
+    "1. Перейдите по ссылке: {url}\n"
+    "2. Скопируйте код авторизации\n"
+    "3. Отправьте мне этот код"
+)
 
-def update_last_row(user_id, col_idx, new_value):
-    excel_file = get_user_excel_file(user_id)
-    init_excel_file(excel_file)
-    wb = load_workbook(excel_file)
-    ws = wb.active
-    if ws.max_row < 2:
-        raise Exception("В вашей таблице пока нет ни одной записи")
-    ws.cell(row=ws.max_row, column=col_idx).value = new_value
-    wb.save(excel_file)
+SUCCESS_LOGIN = "✅ Готово! Я могу сохранять ваши расходы на ваш Яндекс.Диск."
+NEED_LOGIN = "⚠️ Для этой операции нужна авторизация через Яндекс. Введите команду /login"
+ADDED_ROW = "✅ Записал: *{amount}* — {category}\n📊 Всё хранится на вашем Яндекс.Диске."
+EXCEL_LINK_MSG = "🗂 Вот ссылка на вашу таблицу: {link}"
 
-# ─────────── Telegram-команды ───────────
-
-async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    try:
-        if len(context.args) < 2:
-            await update.message.reply_text("Формат: /add сумма категория")
-            return
-        amount = float(context.args[0].replace(",", "."))
-        category = " ".join(context.args[1:])
-        append_to_excel(user_id, amount, category, source="Команда")
-        await update.message.reply_text(f"✅ Добавлено: {amount} — {category}")
-    except ValueError:
-        await update.message.reply_text("❌ Ошибка: сумма должна быть числом.")
-    except Exception as e:
-        logger.exception(e)
-        await update.message.reply_text(f"❌ Ошибка: {e}")
-
-async def edit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    try:
-        if len(context.args) != 1:
-            await update.message.reply_text("Формат: /edit_amount новая_сумма")
-            return
-        new_amount = float(context.args[0].replace(",", "."))
-        update_last_row(user_id, col_idx=2, new_value=new_amount)
-        await update.message.reply_text(f"✅ Сумма обновлена на {new_amount}")
-    except Exception as e:
-        logger.exception(e)
-        await update.message.reply_text(f"❌ Ошибка: {e}")
-
-async def edit_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    try:
-        if not context.args:
-            await update.message.reply_text("Формат: /edit_category новая_категория")
-            return
-        new_category = " ".join(context.args)
-        update_last_row(user_id, col_idx=3, new_value=new_category)
-        await update.message.reply_text(f"✅ Категория обновлена на: {new_category}")
-    except Exception as e:
-        logger.exception(e)
-        await update.message.reply_text(f"❌ Ошибка: {e}")
-
-async def send_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    excel_file = get_user_excel_file(user_id)
-    if not os.path.exists(excel_file):
-        await update.message.reply_text("У вас ещё нет расходов! Добавьте запись — и файл появится.")
-        return
-    try:
-        with open(excel_file, "rb") as f:
-            await update.message.reply_document(document=InputFile(f, filename=f"expenses_{user_id}.xlsx"))
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка при отправке файла: {e}")
-
-async def last_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    excel_file = get_user_excel_file(user_id)
-    if not os.path.exists(excel_file):
-        await update.message.reply_text("У вас ещё нет расходов за сегодня!")
-        return
-    wb = load_workbook(excel_file)
-    ws = wb.active
-    today_str = date.today().strftime("%Y-%m-%d")
-    records = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row[0].startswith(today_str):
-            records.append(row)
-    if not records:
-        await update.message.reply_text("Сегодня ещё нет записей.")
-        return
-    msg = "\n".join(
-        [f"{r[0]} — {r[1]} ₽ — {r[2]} ({r[3]})" for r in records]
+# ───── OAuth URL для Яндекс Диска ─────
+def get_oauth_url():
+    return (
+        f"https://oauth.yandex.ru/authorize?"
+        f"response_type=code&client_id={YANDEX_CLIENT_ID}&"
+        f"scope=cloud_api:disk.app_folder"
     )
-    await update.message.reply_text(f"Записи за сегодня:\n{msg}")
 
-# ─────────── Голосовые сообщения ───────────
+def exchange_code_for_token(code):
+    url = "https://oauth.yandex.ru/token"
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": YANDEX_CLIENT_ID,
+        "client_secret": YANDEX_CLIENT_SECRET,
+    }
+    response = requests.post(url, data=data)
+    if response.status_code == 200:
+        return response.json()['access_token']
+    else:
+        logging.error(f"OAuth error: {response.text}")
+        return None
 
-async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def get_file_link(user_id, token):
+    """Получить ссылку на файл user's expenses на Диске."""
+    file_path = f"app:/Budgetify_{user_id}.csv"
+    url = f"https://cloud-api.yandex.net/v1/disk/resources/download?path={file_path}"
+    headers = {"Authorization": f"OAuth {token}"}
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        return resp.json()['href']
+    return None
+
+def append_row_to_disk(user_id, token, row):
+    """Добавить строку в csv-файл пользователя на Яндекс.Диске."""
+    file_path = f"Budgetify_{user_id}.csv"
+    # Скачиваем существующий файл (если есть)
+    url = f"https://cloud-api.yandex.net/v1/disk/resources/download?path=app:/{file_path}"
+    headers = {"Authorization": f"OAuth {token}"}
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        download_url = resp.json()['href']
+        csv_data = requests.get(download_url).content.decode()
+    else:
+        # Если файла нет, создаём заголовок
+        csv_data = "Дата,Сумма,Категория,Источник\n"
+    # Добавляем новую строку
+    from datetime import datetime
+    csv_data += f"{datetime.now().strftime('%Y-%m-%d %H:%M')},{row[0]},{row[1]},Голос\n"
+    # Загружаем обратно
+    upload_url_resp = requests.get(
+        f"https://cloud-api.yandex.net/v1/disk/resources/upload?path=app:/{file_path}&overwrite=true",
+        headers=headers)
+    if upload_url_resp.status_code == 200:
+        upload_url = upload_url_resp.json()['href']
+        requests.put(upload_url, data=csv_data.encode())
+        return True
+    return False
+
+# ───── Парсинг текста ─────
+
+def parse_text(text):
+    import re
+    text = text.replace(",", ".")
+    regex = r"(\d+)[\s,]*(?:руб[а-я]*)?[\s,]*(?:(\d+)[\s,]*копеек?)?\s*(.*)"
+    match = re.match(regex, text, re.I)
+    if match:
+        rub = float(match.group(1))
+        kop = float(match.group(2)) / 100 if match.group(2) else 0
+        amount = round(rub + kop, 2)
+        category = match.group(3).strip() if match.group(3) else "Без категории"
+        return amount, category
+    parts = text.split()
+    for i, word in enumerate(parts):
+        try:
+            amount = float(word)
+            category = " ".join(parts[i + 1:]) or "Без категории"
+            return amount, category
+        except:
+            continue
+    raise ValueError("Не удалось найти сумму!")
+
+# ───── Команды бота ─────
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(WELCOME, parse_mode="Markdown")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(HELP, parse_mode="Markdown")
+
+async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = get_oauth_url()
+    await update.message.reply_text(LOGIN_MSG.format(url=url), parse_mode="Markdown")
+    return WAITING_OAUTH_CODE
+
+async def oauth_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    code = update.message.text.strip()
     user_id = update.effective_user.id
+    token = exchange_code_for_token(code)
+    if token:
+        user_tokens[user_id] = token
+        await update.message.reply_text(SUCCESS_LOGIN)
+        return ConversationHandler.END
+    else:
+        await update.message.reply_text("Ошибка авторизации. Попробуйте ещё раз: /login")
+        return WAITING_OAUTH_CODE
+
+async def excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    token = user_tokens.get(user_id)
+    if not token:
+        await update.message.reply_text(NEED_LOGIN)
+        return
+    link = get_file_link(user_id, token)
+    if link:
+        await update.message.reply_text(EXCEL_LINK_MSG.format(link=link))
+    else:
+        await update.message.reply_text("Не удалось получить ссылку на файл. Попробуйте записать хотя бы одну трату!")
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    token = user_tokens.get(user_id)
+    if not token:
+        await update.message.reply_text(NEED_LOGIN)
+        return
+
+    # 1. Скачиваем голосовое
+    file = await context.bot.get_file(update.message.voice.file_id)
+    file_path = f"voice_{update.message.message_id}.ogg"
+    await file.download_to_drive(file_path)
+
+    # 2. Распознаём через SpeechKit (IAM токен)
     try:
-        voice = update.message.voice
-        file = await context.bot.get_file(voice.file_id)
-        file_path = f"voice_{update.message.message_id}_{user_id}.ogg"
-        await file.download_to_drive(file_path)
-
-        text = recognize_ogg(file_path)
-        logger.info(f"Распознан текст: {text!r}")
-
-        # Парсим сумму и категорию
-        words = text.strip().split()
-        amount = None
-        category = None
-        for i, w in enumerate(words):
-            try:
-                amount = float(w.replace(",", "."))
-                category = " ".join(words[i+1:]) or "Без категории"
-                break
-            except ValueError:
-                continue
-        if amount is None:
-            raise ValueError("Не удалось найти сумму в распознанном тексте.")
-
-        append_to_excel(user_id, amount, category, source="Голос")
-        await update.message.reply_text(f"✅ Добавлено: {amount} — {category}")
+        text = recognize_ogg(file_path, YANDEX_IAM_TOKEN)
+        amount, category = parse_text(text)
+        row = [amount, category]
+        append_row_to_disk(user_id, token, row)
+        await update.message.reply_text(ADDED_ROW.format(amount=amount, category=category), parse_mode="Markdown")
     except Exception as e:
-        logger.exception(e)
-        await update.message.reply_text(f"❌ Ошибка при обработке голоса: {e}")
+        await update.message.reply_text(f"Ошибка: {e}")
     finally:
-        if 'file_path' in locals() and os.path.exists(file_path):
+        if os.path.exists(file_path):
             os.remove(file_path)
 
-# ─────────── Запуск бота ───────────
+async def last(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    token = user_tokens.get(user_id)
+    if not token:
+        await update.message.reply_text(NEED_LOGIN)
+        return
+    # Тут можно реализовать просмотр последних записей из csv на Диске
+    await update.message.reply_text("⏳ Эта команда в разработке.")
+
+# ───── MAIN ─────
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("add", add_command))
-    app.add_handler(CommandHandler("edit_amount", edit_amount))
-    app.add_handler(CommandHandler("edit_category", edit_category))
-    app.add_handler(CommandHandler("get_excel", send_excel))
-    app.add_handler(CommandHandler("last", last_command))
-    app.add_handler(MessageHandler(filters.VOICE, voice_handler))
-    print("Бот запущен! Ожидаю сообщений...")
+
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("login", login)],
+        states={WAITING_OAUTH_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, oauth_code)]},
+        fallbacks=[CommandHandler("start", start)],
+    )
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(conv_handler)
+    app.add_handler(CommandHandler("excel", excel))
+    app.add_handler(CommandHandler("last", last))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+
+    print("Бот запущен!")
     app.run_polling()
 
 if __name__ == "__main__":
