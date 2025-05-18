@@ -14,6 +14,8 @@ YANDEX_API_KEY = os.getenv('YANDEX_API_KEY')  # <-- для SpeechKit (НЕ IAM!)
 YANDEX_CLIENT_ID = os.getenv('YANDEX_CLIENT_ID')
 YANDEX_CLIENT_SECRET = os.getenv('YANDEX_CLIENT_SECRET')
 
+print("YANDEX_CLIENT_ID:", YANDEX_CLIENT_ID)  # ← вот сюда!
+
 logging.basicConfig(level=logging.INFO)
 
 WAITING_OAUTH_CODE = 1
