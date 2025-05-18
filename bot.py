@@ -1,5 +1,3 @@
-print("====== ЭТО ТОЧНО МОЙ ФАЙЛ! ======")
-
 import os
 import logging
 import requests
@@ -13,24 +11,21 @@ from speechkit import recognize_ogg
 # ───── Загрузка переменных окружения ─────
 load_dotenv()
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-YANDEX_API_KEY = os.getenv('YANDEX_API_KEY')  # ← используем API KEY!
+YANDEX_API_KEY = os.getenv('YANDEX_API_KEY')  # именно API_KEY для SpeechKit
 YANDEX_CLIENT_ID = os.getenv('YANDEX_CLIENT_ID')
 YANDEX_CLIENT_SECRET = os.getenv('YANDEX_CLIENT_SECRET')
 
 logging.basicConfig(level=logging.INFO)
 
 WAITING_OAUTH_CODE = 1
+user_tokens = {}
 
-user_tokens = {}  # user_id -> OAuth token
-
-# ───── Шаблоны сообщений ─────
 WELCOME = (
     "👋 Привет! Я Budgetify — твой ассистент по учёту расходов.\n\n"
     "Отправь мне голосовое сообщение с тратой, например:\n"
     "`250 метро`\nили\n`127 рублей 25 копеек шоколадка`.\n\n"
     "❗ Чтобы сохранять расходы в Яндекс.Диск, нужно авторизоваться: /login"
 )
-
 HELP = (
     "📝 *Справка по командам:*\n"
     "/start — приветствие\n"
@@ -39,28 +34,24 @@ HELP = (
     "/last — последние расходы\n"
     "/help — помощь"
 )
-
 LOGIN_MSG = (
     "🔑 Для работы с Яндекс.Диском, пожалуйста, авторизуйтесь:\n\n"
     "1. Перейдите по ссылке: {url}\n"
     "2. Скопируйте код авторизации\n"
     "3. Отправьте мне этот код"
 )
-
-SUCCESS_LOGIN = "✅ Готово! Я могу сохранять ваши расходы на ваш Яндекс.Диск."
+SUCCESS_LOGIN = "✅ Готово! Я могу сохранять ваши расходы на ваш Яндекс.Диске."
 NEED_LOGIN = "⚠️ Для этой операции нужна авторизация через Яндекс. Введите команду /login"
 ADDED_ROW = "✅ Записал: *{amount}* — {category}\n📊 Всё хранится на вашем Яндекс.Диске."
 EXCEL_LINK_MSG = "🗂 Вот ссылка на вашу таблицу: {link}"
 
-# ───── OAuth URL для Яндекс Диска ─────
 def get_oauth_url():
-    url = (
+    print("DEBUG: YANDEX_CLIENT_ID =", YANDEX_CLIENT_ID)
+    return (
         f"https://oauth.yandex.ru/authorize?"
         f"response_type=code&client_id={YANDEX_CLIENT_ID}&"
         f"scope=cloud_api:disk.app_folder"
     )
-    print("DEBUG OAuth URL:", url)
-    return url
 
 def exchange_code_for_token(code):
     url = "https://oauth.yandex.ru/token"
@@ -78,7 +69,6 @@ def exchange_code_for_token(code):
         return None
 
 def get_file_link(user_id, token):
-    """Получить ссылку на файл user's expenses на Диске."""
     file_path = f"app:/Budgetify_{user_id}.csv"
     url = f"https://cloud-api.yandex.net/v1/disk/resources/download?path={file_path}"
     headers = {"Authorization": f"OAuth {token}"}
@@ -88,7 +78,6 @@ def get_file_link(user_id, token):
     return None
 
 def append_row_to_disk(user_id, token, row):
-    """Добавить строку в csv-файл пользователя на Яндекс.Диске."""
     file_path = f"Budgetify_{user_id}.csv"
     # Скачиваем существующий файл (если есть)
     url = f"https://cloud-api.yandex.net/v1/disk/resources/download?path=app:/{file_path}"
@@ -98,7 +87,6 @@ def append_row_to_disk(user_id, token, row):
         download_url = resp.json()['href']
         csv_data = requests.get(download_url).content.decode()
     else:
-        # Если файла нет, создаём заголовок
         csv_data = "Дата,Сумма,Категория,Источник\n"
     from datetime import datetime
     csv_data += f"{datetime.now().strftime('%Y-%m-%d %H:%M')},{row[0]},{row[1]},Голос\n"
@@ -111,8 +99,6 @@ def append_row_to_disk(user_id, token, row):
         requests.put(upload_url, data=csv_data.encode())
         return True
     return False
-
-# ───── Парсинг текста ─────
 
 def parse_text(text):
     import re
@@ -134,8 +120,6 @@ def parse_text(text):
         except:
             continue
     raise ValueError("Не удалось найти сумму!")
-
-# ───── Команды бота ─────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(WELCOME, parse_mode="Markdown")
@@ -203,12 +187,11 @@ async def last(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not token:
         await update.message.reply_text(NEED_LOGIN)
         return
-    # Тут можно реализовать просмотр последних записей из csv на Диске
     await update.message.reply_text("⏳ Эта команда в разработке.")
 
-# ───── MAIN ─────
-
 def main():
+    print("====== ЭТО ТОЧНО МОЙ ФАЙЛ! ======")
+    print("DEBUG: YANDEX_CLIENT_ID =", YANDEX_CLIENT_ID)
     app = Application.builder().token(BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
