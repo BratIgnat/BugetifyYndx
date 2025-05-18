@@ -52,11 +52,12 @@ EXCEL_LINK_MSG = "🗂 Вот ссылка на вашу таблицу: {link}"
 
 # ───── OAuth URL для Яндекс Диска ─────
 def get_oauth_url():
-    return (
+    url = (
         f"https://oauth.yandex.ru/authorize?"
         f"response_type=code&client_id={YANDEX_CLIENT_ID}&"
         f"scope=cloud_api:disk.app_folder"
     )
+    print("DEBUG OAuth URL:", url)
     return url
 
 def exchange_code_for_token(code):
