@@ -53,6 +53,7 @@ def get_oauth_url():
         f"scope=cloud_api:disk.app_folder"
     )
 
+
 def exchange_code_for_token(code):
     url = "https://oauth.yandex.ru/token"
     data = {
