@@ -1,215 +1,100 @@
-import os
 import logging
+import os
+import io
 import requests
-from telegram import Update
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler
-)
-from speechkit import recognize_ogg
+from aiogram import Bot, Dispatcher, types, executor
+from aiogram.types import InputFile
+from dotenv import load_dotenv
+from speechkit import speech_to_text
+from yandex_disk import save_to_yandex_disk
 
-# --- Читаем переменные окружения (systemd через EnvironmentFile) ---
+# --- Читаем переменные окружения (systemd через EnvironmentFile)
 BOT_TOKEN = os.environ['BOT_TOKEN']
 YANDEX_API_KEY = os.environ['YANDEX_API_KEY']
 YANDEX_CLIENT_ID = os.environ['YANDEX_CLIENT_ID']
 YANDEX_CLIENT_SECRET = os.environ['YANDEX_CLIENT_SECRET']
 
+# --- Инициализируем Telegram-бота
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
 logging.basicConfig(level=logging.INFO)
 
-WAITING_OAUTH_CODE = 1
-user_tokens = {}
-user_files = {}
+user_tokens = {}  # Временное хранилище токенов
 
-WELCOME = (
-    "👋 Привет! Я Budgetify — твой ассистент по учёту расходов.\n\n"
-    "Отправь мне голосовое сообщение с тратой, например:\n"
-    "`250 метро`\nили\n`127 рублей 25 копеек шоколадка`.\n\n"
-    "❗ Чтобы сохранять расходы в Яндекс.Диск, нужно авторизоваться: /login"
-)
+@dp.message_handler(commands=['start'])
+async def start(message: types.Message):
+    await message.answer("👋 Привет! Я Budgetify — твой ассистент по учёту расходов.\n\n"
+                         "Отправь мне голосовое сообщение с тратой, например:\n"
+                         "250 метро\nили\n127 рублей 25 копеек шоколадка.\n\n"
+                         "❗️ Чтобы сохранять расходы в Яндекс.Диск, нужно авторизоваться: /login")
 
-HELP = (
-    "📝 *Справка по командам:*\n"
-    "/start — приветствие\n"
-    "/login — подключить Яндекс.Диск\n"
-    "/excel — получить ссылку на свою таблицу\n"
-    "/last — последние расходы\n"
-    "/help — помощь"
-)
+@dp.message_handler(commands=['login'])
+async def login_command(message: types.Message):
+    oauth_url = generate_oauth_url()
+    # Отправим как явную ссылку в HTML-режиме, чтобы Telegram не портил URL
+    await message.answer(f"🔑 <b>Для авторизации перейдите по ссылке:</b>\n<a href=\"{oauth_url}\">Авторизоваться через Яндекс</a>", parse_mode="HTML")
 
-LOGIN_MSG = (
-    "🔑 Для работы с Яндекс.Диском, пожалуйста, авторизуйтесь:\n\n"
-    "1. Перейдите по ссылке: {url}\n"
-    "2. Скопируйте код авторизации\n"
-    "3. Отправьте мне этот код"
-)
+# Генерация OAuth URL для пользователя
 
-SUCCESS_LOGIN = "✅ Готово! Я могу сохранять ваши расходы на ваш Яндекс.Диск."
-NEED_LOGIN = "⚠️ Для этой операции нужна авторизация через Яндекс. Введите команду /login"
-ADDED_ROW = "✅ Записал: *{amount}* — {category}\n📊 Всё хранится на вашем Яндекс.Диске."
-EXCEL_LINK_MSG = "🗂 Вот ссылка на вашу таблицу: {link}"
+def generate_oauth_url():
+    redirect_uri = 'https://oauth.yandex.ru/verification_code'
+    scope = 'cloud_api:disk.app_folder'
+    return (f"https://oauth.yandex.ru/authorize?response_type=code"
+            f"&client_id={YANDEX_CLIENT_ID}"
+            f"&redirect_uri={redirect_uri}"
+            f"&scope={scope}")
 
-# --- Корректная OAuth-ссылка ---
-def get_oauth_url():
-    url = (
-        "https://oauth.yandex.ru/authorize?"
-        f"response_type=code&client_id={YANDEX_CLIENT_ID}&"
-        f"scope=cloud_api:disk.app_folder"
-    )
-    print(f"\n==== ОТПРАВЛЯЮ ЭТУ ССЫЛКУ ПОЛЬЗОВАТЕЛЮ ====\n{url}\n===============================\n")
-    return url
+@dp.message_handler(commands=['code'])
+async def code_command(message: types.Message):
+    code = message.get_args()
+    if not code:
+        await message.answer("❗ Пожалуйста, введите код авторизации после команды. Пример: /code 1234567")
+        return
+
+    token_data = exchange_code_for_token(code)
+    if 'access_token' in token_data:
+        user_tokens[message.from_user.id] = token_data['access_token']
+        await message.answer("✅ Авторизация прошла успешно! Теперь можете отправлять голосовые сообщения с тратами.")
+    else:
+        await message.answer("❌ Ошибка авторизации. Проверьте код и попробуйте снова.")
+
+# Функция обмена кода на токен
 
 def exchange_code_for_token(code):
     url = "https://oauth.yandex.ru/token"
     data = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "client_id": YANDEX_CLIENT_ID,
-        "client_secret": YANDEX_CLIENT_SECRET,
+        'grant_type': 'authorization_code',
+        'code': code,
+        'client_id': YANDEX_CLIENT_ID,
+        'client_secret': YANDEX_CLIENT_SECRET
     }
     response = requests.post(url, data=data)
-    if response.status_code == 200:
-        return response.json()['access_token']
+    return response.json()
+
+@dp.message_handler(content_types=['voice'])
+async def handle_voice(message: types.Message):
+    await message.answer("🔄 Обрабатываю голосовое сообщение...")
+    file_info = await bot.get_file(message.voice.file_id)
+    file = await bot.download_file(file_info.file_path)
+    ogg_data = file.read()
+
+    text = speech_to_text(ogg_data)
+
+    if text:
+        await message.answer(f"📝 Распознанный текст: {text}")
+
+        token = user_tokens.get(message.from_user.id)
+        if token:
+            filename = f"expense_{message.message_id}.txt"
+            yandex_response = save_to_yandex_disk(filename, text, token)
+            if yandex_response:
+                await message.answer("☁️ Данные успешно сохранены в Яндекс.Диск.")
+            else:
+                await message.answer("⚠️ Не удалось сохранить в Яндекс.Диск.")
+        else:
+            await message.answer("❗ Сначала необходимо авторизоваться через /login")
     else:
-        logging.error(f"OAuth error: {response.text}")
-        return None
+        await message.answer("❌ Не удалось распознать речь. Попробуйте снова.")
 
-def get_file_link(user_id, token):
-    file_path = f"app:/Budgetify_{user_id}.csv"
-    url = f"https://cloud-api.yandex.net/v1/disk/resources/download?path={file_path}"
-    headers = {"Authorization": f"OAuth {token}"}
-    resp = requests.get(url, headers=headers)
-    if resp.status_code == 200:
-        return resp.json()['href']
-    return None
-
-def append_row_to_disk(user_id, token, row):
-    file_path = f"Budgetify_{user_id}.csv"
-    url = f"https://cloud-api.yandex.net/v1/disk/resources/download?path=app:/{file_path}"
-    headers = {"Authorization": f"OAuth {token}"}
-    resp = requests.get(url, headers=headers)
-    if resp.status_code == 200:
-        download_url = resp.json()['href']
-        csv_data = requests.get(download_url).content.decode()
-    else:
-        csv_data = "Дата,Сумма,Категория,Источник\n"
-    from datetime import datetime
-    csv_data += f"{datetime.now().strftime('%Y-%m-%d %H:%M')},{row[0]},{row[1]},Голос\n"
-    upload_url_resp = requests.get(
-        f"https://cloud-api.yandex.net/v1/disk/resources/upload?path=app:/{file_path}&overwrite=true",
-        headers=headers)
-    if upload_url_resp.status_code == 200:
-        upload_url = upload_url_resp.json()['href']
-        requests.put(upload_url, data=csv_data.encode())
-        return True
-    return False
-
-def parse_text(text):
-    import re
-    text = text.replace(",", ".")
-    regex = r"(\d+)[\s,]*(?:руб[а-я]*)?[\s,]*(?:(\d+)[\s,]*копеек?)?\s*(.*)"
-    match = re.match(regex, text, re.I)
-    if match:
-        rub = float(match.group(1))
-        kop = float(match.group(2)) / 100 if match.group(2) else 0
-        amount = round(rub + kop, 2)
-        category = match.group(3).strip() if match.group(3) else "Без категории"
-        return amount, category
-    parts = text.split()
-    for i, word in enumerate(parts):
-        try:
-            amount = float(word)
-            category = " ".join(parts[i + 1:]) or "Без категории"
-            return amount, category
-        except:
-            continue
-    raise ValueError("Не удалось найти сумму!")
-
-# --- Команды бота ---
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(WELCOME, parse_mode="Markdown")
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(HELP, parse_mode="Markdown")
-
-async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = get_oauth_url()
-    await update.message.reply_text(LOGIN_MSG.format(url=url), parse_mode="Markdown")
-    return WAITING_OAUTH_CODE
-
-async def oauth_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    code = update.message.text.strip()
-    user_id = update.effective_user.id
-    token = exchange_code_for_token(code)
-    if token:
-        user_tokens[user_id] = token
-        await update.message.reply_text(SUCCESS_LOGIN)
-        return ConversationHandler.END
-    else:
-        await update.message.reply_text("Ошибка авторизации. Попробуйте ещё раз: /login")
-        return WAITING_OAUTH_CODE
-
-async def excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    token = user_tokens.get(user_id)
-    if not token:
-        await update.message.reply_text(NEED_LOGIN)
-        return
-    link = get_file_link(user_id, token)
-    if link:
-        await update.message.reply_text(EXCEL_LINK_MSG.format(link=link))
-    else:
-        await update.message.reply_text("Не удалось получить ссылку на файл. Попробуйте записать хотя бы одну трату!")
-
-async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    token = user_tokens.get(user_id)
-    if not token:
-        await update.message.reply_text(NEED_LOGIN)
-        return
-
-    file = await context.bot.get_file(update.message.voice.file_id)
-    file_path = f"voice_{update.message.message_id}.ogg"
-    await file.download_to_drive(file_path)
-
-    try:
-        text = recognize_ogg(file_path, YANDEX_API_KEY)
-        amount, category = parse_text(text)
-        row = [amount, category]
-        append_row_to_disk(user_id, token, row)
-        await update.message.reply_text(ADDED_ROW.format(amount=amount, category=category), parse_mode="Markdown")
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка: {e}")
-    finally:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
-async def last(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    token = user_tokens.get(user_id)
-    if not token:
-        await update.message.reply_text(NEED_LOGIN)
-        return
-    await update.message.reply_text("⏳ Эта команда в разработке.")
-
-def main():
-    print("====== ЭТО ТОЧНО МОЙ ФАЙЛ! ======")
-    app = Application.builder().token(BOT_TOKEN).build()
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("login", login)],
-        states={WAITING_OAUTH_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, oauth_code)]},
-        fallbacks=[CommandHandler("start", start)],
-    )
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(conv_handler)
-    app.add_handler(CommandHandler("excel", excel))
-    app.add_handler(CommandHandler("last", last))
-    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-
-    print("Бот запущен!")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True)
