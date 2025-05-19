@@ -1,56 +1,44 @@
-import os
 import requests
-import logging
+import uuid
+import os
+from pydub import AudioSegment
+from tempfile import NamedTemporaryFile
 
-# Подхватываем API-ключ из .env
-from dotenv import load_dotenv
-load_dotenv()
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
+FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")  # необязательно, если SpeechKit IAM
 
-if not YANDEX_API_KEY:
-    raise RuntimeError("YANDEX_API_KEY не задан в переменных окружения")
 
-# Конфигурируем логирование
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# URL для синхронного распознавания
-STT_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
-
-def recognize_ogg(file_path: str) -> str:
+def speech_to_text(ogg_data):
     """
-    Распознаёт русский текст из ogg-файла через Yandex SpeechKit.
-    Возвращает результат распознавания (строку).
+    Преобразует ogg-файл (байты) в текст с помощью Yandex SpeechKit.
     """
+    # Сохраняем ogg временно и конвертируем в wav
+    with NamedTemporaryFile(suffix=".ogg", delete=True) as ogg_file:
+        ogg_file.write(ogg_data)
+        ogg_file.flush()
+
+        audio = AudioSegment.from_ogg(ogg_file.name)
+
+        with NamedTemporaryFile(suffix=".wav", delete=True) as wav_file:
+            audio.export(wav_file.name, format="wav")
+            wav_file.flush()
+
+            # Читаем содержимое wav-файла
+            with open(wav_file.name, "rb") as f:
+                audio_bytes = f.read()
+
+    # Формируем запрос к Yandex SpeechKit
+    url = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
     headers = {
         "Authorization": f"Api-Key {YANDEX_API_KEY}",
     }
     params = {
         "lang": "ru-RU",
-        "profanityFilter": False,
-        "folderId": os.getenv("YANDEX_FOLDER_ID", ""),  # если у вас указан Folder ID
+        # "folderId": FOLDER_ID,  # если требуется
     }
 
-    logger.info(f"Отправка запроса в SpeechKit: {file_path}")
-    with open(file_path, "rb") as audio_file:
-        resp = requests.post(
-            STT_URL,
-            headers=headers,
-            params=params,
-            data=audio_file
-        )
+    response = requests.post(url, headers=headers, params=params, data=audio_bytes)
+    response.raise_for_status()
 
-    # Проверка статуса
-    if resp.status_code != 200:
-        logger.error(f"Yandex SpeechKit HTTP {resp.status_code}: {resp.text}")
-        resp.raise_for_status()
-
-    result = resp.json()
-    if result.get("error_code", 0) != 0:
-        msg = result.get("error_message", "Unknown error")
-        logger.error(f"Yandex SpeechKit error: {result!r}")
-        raise RuntimeError(f"SpeechKit: {msg}")
-
-    text = result.get("result", "")
-    logger.info(f"Распознано: {text!r}")
-    return text
+    result = response.json()
+    return result.get("result")
