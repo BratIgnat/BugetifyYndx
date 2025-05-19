@@ -1,33 +1,31 @@
 import os
 import logging
 import requests
-from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler
 )
 from speechkit import recognize_ogg
 
-# ───── Загрузка переменных окружения ─────
-load_dotenv()
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-YANDEX_API_KEY = os.getenv('YANDEX_API_KEY')           # для SpeechKit (именно API_KEY, не IAM)
-YANDEX_CLIENT_ID = os.getenv('YANDEX_CLIENT_ID')       # OAuth client_id для Диска
-YANDEX_CLIENT_SECRET = os.getenv('YANDEX_CLIENT_SECRET')
+# --- Читаем переменные окружения (systemd через EnvironmentFile) ---
+BOT_TOKEN = os.environ['BOT_TOKEN']
+YANDEX_API_KEY = os.environ['YANDEX_API_KEY']
+YANDEX_CLIENT_ID = os.environ['YANDEX_CLIENT_ID']
+YANDEX_CLIENT_SECRET = os.environ['YANDEX_CLIENT_SECRET']
 
 logging.basicConfig(level=logging.INFO)
 
 WAITING_OAUTH_CODE = 1
-
 user_tokens = {}
+user_files = {}
 
-# ───── Шаблоны сообщений ─────
 WELCOME = (
     "👋 Привет! Я Budgetify — твой ассистент по учёту расходов.\n\n"
     "Отправь мне голосовое сообщение с тратой, например:\n"
     "`250 метро`\nили\n`127 рублей 25 копеек шоколадка`.\n\n"
     "❗ Чтобы сохранять расходы в Яндекс.Диск, нужно авторизоваться: /login"
 )
+
 HELP = (
     "📝 *Справка по командам:*\n"
     "/start — приветствие\n"
@@ -36,18 +34,20 @@ HELP = (
     "/last — последние расходы\n"
     "/help — помощь"
 )
+
 LOGIN_MSG = (
     "🔑 Для работы с Яндекс.Диском, пожалуйста, авторизуйтесь:\n\n"
     "1. Перейдите по ссылке: {url}\n"
     "2. Скопируйте код авторизации\n"
     "3. Отправьте мне этот код"
 )
+
 SUCCESS_LOGIN = "✅ Готово! Я могу сохранять ваши расходы на ваш Яндекс.Диск."
 NEED_LOGIN = "⚠️ Для этой операции нужна авторизация через Яндекс. Введите команду /login"
 ADDED_ROW = "✅ Записал: *{amount}* — {category}\n📊 Всё хранится на вашем Яндекс.Диске."
 EXCEL_LINK_MSG = "🗂 Вот ссылка на вашу таблицу: {link}"
 
-# ───── Корректная OAuth-ссылка ─────
+# --- Корректная OAuth-ссылка ---
 def get_oauth_url():
     url = (
         "https://oauth.yandex.ru/authorize?"
@@ -102,7 +102,6 @@ def append_row_to_disk(user_id, token, row):
         return True
     return False
 
-# ───── Продвинутый парсинг текста ─────
 def parse_text(text):
     import re
     text = text.replace(",", ".")
@@ -114,18 +113,17 @@ def parse_text(text):
         amount = round(rub + kop, 2)
         category = match.group(3).strip() if match.group(3) else "Без категории"
         return amount, category
-    # Фолбек на любую цифру
     parts = text.split()
     for i, word in enumerate(parts):
         try:
-            amount = float(word.replace(',', '.'))
+            amount = float(word)
             category = " ".join(parts[i + 1:]) or "Без категории"
             return amount, category
         except:
             continue
     raise ValueError("Не удалось найти сумму!")
 
-# ───── Команды бота ─────
+# --- Команды бота ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(WELCOME, parse_mode="Markdown")
@@ -168,11 +166,11 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not token:
         await update.message.reply_text(NEED_LOGIN)
         return
-    # 1. Скачиваем голосовое
+
     file = await context.bot.get_file(update.message.voice.file_id)
     file_path = f"voice_{update.message.message_id}.ogg"
     await file.download_to_drive(file_path)
-    # 2. SpeechKit (API_KEY)
+
     try:
         text = recognize_ogg(file_path, YANDEX_API_KEY)
         amount, category = parse_text(text)
@@ -196,17 +194,20 @@ async def last(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     print("====== ЭТО ТОЧНО МОЙ ФАЙЛ! ======")
     app = Application.builder().token(BOT_TOKEN).build()
+
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("login", login)],
         states={WAITING_OAUTH_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, oauth_code)]},
         fallbacks=[CommandHandler("start", start)],
     )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("excel", excel))
     app.add_handler(CommandHandler("last", last))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+
     print("Бот запущен!")
     app.run_polling()
 
