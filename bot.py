@@ -11,6 +11,8 @@ from yandex_disk import save_to_yandex_disk
 
 env_path = Path(__file__).resolve().parent / '.env'
 load_dotenv(dotenv_path=env_path)
+print("DEBUG BOT_TOKEN:", os.getenv("BOT_TOKEN"))
+
 
 # --- Читаем переменные окружения (systemd через EnvironmentFile)
 BOT_TOKEN = os.environ['BOT_TOKEN']
