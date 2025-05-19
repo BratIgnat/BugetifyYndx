@@ -1,3 +1,9 @@
+import os
+import requests
+import uuid
+from pydub import AudioSegment
+from tempfile import NamedTemporaryFile
+
 def speech_to_text(ogg_data):
     from pydub import AudioSegment
     from tempfile import NamedTemporaryFile
