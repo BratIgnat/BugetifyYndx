@@ -5,8 +5,12 @@ import requests
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import InputFile
 from dotenv import load_dotenv
+from pathlib import Path
 from speechkit import speech_to_text
 from yandex_disk import save_to_yandex_disk
+
+env_path = Path(__file__).resolve().parent / '.env'
+load_dotenv(dotenv_path=env_path)
 
 # --- Читаем переменные окружения (systemd через EnvironmentFile)
 BOT_TOKEN = os.environ['BOT_TOKEN']
