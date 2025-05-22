@@ -1,4 +1,7 @@
-python-telegram-bot
+# ✅ requirements.txt — зависимости для проекта
+aiogram==2.25.1
+dotenv
 requests
-oauthlib
-yadisk
+pandas
+pydub
+openpyxl
