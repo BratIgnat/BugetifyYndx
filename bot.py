@@ -30,8 +30,7 @@ async def handle_voice(message: types.Message):
     try:
         text = speech_to_text(ogg_data)
         if text:
-            await message.reply(f"📝 Распознано:
-{text}")
+            await message.reply(f"📝 Распознано:{text}")
         else:
             await message.reply("😕 Не удалось распознать речь.")
     except Exception as e:
