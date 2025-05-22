@@ -1,8 +1,7 @@
 import os
 import requests
 
-def save_to_yandex_disk(user_token: str, filename: str, csv_data: str):
-    # создаём файл в облаке
+def save_to_yadisk(user_token: str, filename: str, csv_data: str):
     url = "https://cloud-api.yandex.net/v1/disk/resources/upload"
     params = {
         "path": f"app:/budgetify/{filename}",
