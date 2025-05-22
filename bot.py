@@ -1,61 +1,43 @@
 import logging
 import os
-from aiogram import Bot, Dispatcher, executor, types
-from aiogram.types import ContentType
+from aiogram import Bot, Dispatcher, types, executor
+from dotenv import load_dotenv
 from speechkit import speech_to_text
 
-# === НАСТРОЙКА ЛОГИРОВАНИЯ ===
-LOG_PATH = '/home/brotherignat/BugetifyYndx/bot.log'
-logging.basicConfig(
-    filename=LOG_PATH,
-    level=logging.INFO,  # Меняй на DEBUG для подробностей
-    format='%(asctime)s %(levelname)s:%(name)s: %(message)s'
-)
-logger = logging.getLogger(__name__)
+load_dotenv()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Логирование необработанных исключений (чтобы ничего не терялось!)
-import sys
-def handle_exception(exc_type, exc_value, exc_traceback):
-    if issubclass(exc_type, KeyboardInterrupt):
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
-    logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
-sys.excepthook = handle_exception
-
-# === БОТ ===
-BOT_TOKEN = os.getenv("BOT_TOKEN", "ТВОЙ_ТОКЕН")
+logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
-@dp.message_handler(commands=["start", "help"])
-async def send_welcome(message: types.Message):
-    logging.info(f"Пользователь {message.from_user.id} начал работу с ботом.")
-    await message.reply("Привет! Я Budgetify бот. Пришли голосовое сообщение или чек.")
 
-@dp.message_handler(content_types=ContentType.VOICE)
+@dp.message_handler(commands=["start"])
+async def cmd_start(message: types.Message):
+    await message.answer("👋 Привет! Я Budgetify — твой ассистент по учёту расходов.\n\n"
+                         "Отправь мне голосовое сообщение с тратой, например:\n"
+                         "250 метро\nили\n127 рублей 25 копеек шоколадка.")
+
+
+@dp.message_handler(content_types=types.ContentType.VOICE)
 async def handle_voice(message: types.Message):
-    try:
-        logging.info(f"Получено голосовое сообщение от {message.from_user.id}")
-        voice = message.voice
-        ogg_data = await voice.download(destination=bytes)
-        # Используй свою функцию speech_to_text из speechkit.py
-        text = speech_to_text(ogg_data)
-        await message.reply(f"Текст из голосового: {text}")
-        logging.info(f"Распознано: {text}")
-    except Exception as e:
-        logging.error("Ошибка при обработке голосового сообщения", exc_info=True)
-        await message.reply("Ошибка при обработке голосового сообщения.")
+    await message.reply("🎙 Обрабатываю голосовое сообщение...")
 
-@dp.message_handler(content_types=ContentType.PHOTO)
-async def handle_photo(message: types.Message):
+    voice = await message.voice.get_file()
+    ogg_file = await bot.download_file(voice.file_path)
+    ogg_data = ogg_file.read()
+
     try:
-        logging.info(f"Получено фото от {message.from_user.id}")
-        # Можно добавить обработку чеков тут (оставь заглушку или логику по своему сценарию)
-        await message.reply("Спасибо, фото получено! (Обработка чеков будет реализована)")
+        text = speech_to_text(ogg_data)
+        if text:
+            await message.reply(f"📝 Распознано:
+{text}")
+        else:
+            await message.reply("😕 Не удалось распознать речь.")
     except Exception as e:
-        logging.error("Ошибка при обработке фото", exc_info=True)
-        await message.reply("Ошибка при обработке фото.")
+        logging.exception("Ошибка при обработке голоса")
+        await message.reply("⚠️ Произошла ошибка при распознавании.")
+
 
 if __name__ == "__main__":
-    logging.info("Запуск BudgetifyBot!")
     executor.start_polling(dp, skip_updates=True)
