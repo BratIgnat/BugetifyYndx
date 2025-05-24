@@ -14,7 +14,7 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s]: %(message)s',
     handlers=[
         logging.FileHandler("bot.log", encoding='utf-8'),
-        logging.StreamHandler()  # Вывод в консоль!
+        logging.StreamHandler()  # Вывод в консоль!]
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
