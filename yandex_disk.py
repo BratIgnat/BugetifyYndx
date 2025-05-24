@@ -1,5 +1,8 @@
 import os
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()  # Эта строка должна быть в самом начале!
 
 APP_ID = os.getenv("YANDEX_CLIENT_ID")
 APP_SECRET = os.getenv("YANDEX_CLIENT_SECRET")
