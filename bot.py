@@ -10,9 +10,11 @@ load_dotenv()
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 logging.basicConfig(
-    filename="logs/bot.log",
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    format='%(asctime)s [%(levelname)s]: %(message)s',
+    handlers=[
+        logging.FileHandler("bot.log", encoding='utf-8'),
+        logging.StreamHandler()  # Вывод в консоль!
 )
 
 bot = Bot(token=BOT_TOKEN)
