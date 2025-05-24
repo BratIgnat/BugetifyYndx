@@ -15,26 +15,19 @@ logging.basicConfig(level=logging.INFO, filename="bot.log",
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# --- ФУНКЦИЯ ПАРСИНГА ---
+# --------- Новый парсер суммы ---------
 import re
 def parse_expense(text):
-    """
-    Парсит строку типа '301 рубль 50 копеек мороженое' -> (301.50, 'мороженое')
-    Возвращает (float, str) либо (None, None) если не удалось распарсить.
-    """
     pattern = r"(\d+)\s*(?:руб(?:лей|ль|ля|\.|)?|р|руб\.)?(?:\s*(\d+)\s*(?:коп(?:еек|ей|\.|)?))?\s*(.*)"
     match = re.match(pattern, text.strip().lower())
     if not match:
         return None, None
-
     rub = match.group(1)
     kop = match.group(2)
     category = match.group(3).strip()
-
     amount = float(rub)
     if kop:
         amount += float(kop) / 100
-
     return amount, category or ""
 
 @dp.message_handler(commands=["start"])
@@ -67,7 +60,6 @@ async def handle_voice(message: types.Message):
         await message.reply("❗️ Чтобы сохранять расходы на Яндекс.Диск, нужно авторизоваться. Введите команду /login")
         return
 
-    # Скачиваем голосовое сообщение
     file_info = await bot.get_file(message.voice.file_id)
     ogg_path = f"{user_id}.ogg"
     await bot.download_file(file_info.file_path, ogg_path)
@@ -80,15 +72,11 @@ async def handle_voice(message: types.Message):
             return
 
         await message.reply(f"✅ Расход распознан:\nСумма: {amount}\nКатегория: {category}")
-
-        # Сохраняем в Excel на Яндекс.Диске
         save_to_yadisk(user_id, amount, category)
         await message.reply("✅ Расход сохранён и загружен на Яндекс.Диск!")
-
     except Exception as e:
         logging.error(f"Ошибка при обработке голоса: {e}")
         await message.reply("⚠️ Ошибка при обработке голосового сообщения.")
-
     finally:
         if os.path.exists(ogg_path):
             os.remove(ogg_path)
