@@ -5,6 +5,8 @@ from pydub import AudioSegment
 
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 
+print("YANDEX_API_KEY:", os.getenv("YANDEX_API_KEY"))
+
 def speech_to_text(ogg_data):
     with NamedTemporaryFile(suffix=".ogg", delete=True) as ogg_file:
         ogg_file.write(ogg_data)
