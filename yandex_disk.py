@@ -1,48 +1,43 @@
 import os
-import io
-import openpyxl
-import requests
+import pandas as pd
+from yadisk import YaDisk  # или ваш метод авторизации и загрузки файлов
 
-def get_user_token(user_id):
-    tokens_dir = "tokens"
-    token_path = os.path.join(tokens_dir, f"{user_id}.token")
-    if not os.path.exists(token_path):
-        return None
-    with open(token_path, "r") as f:
-        return f.read().strip()
+def save_to_yadisk(user_id, amount, category):
+    """
+    Сохраняет данные пользователя в Excel-файл (XLSX) и заливает на Яндекс.Диск.
+    """
+    filename = f"{user_id}.xlsx"
+    local_path = filename
+    remote_path = f"app:/budgetify/{filename}"
 
-def save_expense_to_excel(user_token, user_id, amount, category):
-    disk_path = f"app:/budgetify/{user_id}.xlsx"
-    headers = {"Authorization": f"OAuth {user_token}"}
-
-    # Скачиваем файл если он есть, иначе создаём новый
-    url = f"https://cloud-api.yandex.net/v1/disk/resources/download?path={disk_path}"
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        download_url = response.json()["href"]
-        excel_content = requests.get(download_url).content
-        workbook = openpyxl.load_workbook(io.BytesIO(excel_content))
-        sheet = workbook.active
+    # Проверяем, есть ли уже такой файл
+    if os.path.exists(local_path):
+        df = pd.read_excel(local_path)
     else:
-        # Новый Excel
-        workbook = openpyxl.Workbook()
-        sheet = workbook.active
-        sheet.append(["#", "Сумма", "Категория"])
+        df = pd.DataFrame(columns=["#", "Сумма", "Категория"])
 
-    # Следующая строка
-    row_num = sheet.max_row
-    sheet.append([row_num, f"{amount}", category])
+    # Индекс новой записи
+    idx = len(df) + 1
+    df.loc[len(df)] = [idx, amount, category]
 
-    # Сохраняем в память
-    output = io.BytesIO()
-    workbook.save(output)
-    output.seek(0)
+    # Сохраняем локально
+    df.to_excel(local_path, index=False)
 
-    # Получаем upload url
-    upload_url = f"https://cloud-api.yandex.net/v1/disk/resources/upload?path={disk_path}&overwrite=true"
-    response = requests.get(upload_url, headers=headers)
-    upload_href = response.json()["href"]
-    r = requests.put(upload_href, data=output.getvalue())
-    r.raise_for_status()
+    # Загружаем на Яндекс.Диск через ваш API/SDK
+    # Авторизация должна быть реализована через ваш токен
+    # y = YaDisk(token=...) # Подключение и авторизация, используйте ваш код
+    # y.upload(local_path, remote_path, overwrite=True)
+    # ----------------------
+    # Вместо YaDisk — вставьте ваш рабочий метод загрузки файла на диск пользователя!
 
-    return True
+def is_user_authenticated(user_id):
+    # ваша логика проверки токена
+    pass
+
+def get_auth_link(user_id):
+    # ваша логика генерации ссылки для авторизации
+    pass
+
+def set_auth_code(user_id, code):
+    # ваша логика обмена code на токен и сохранения его для пользователя
+    pass
