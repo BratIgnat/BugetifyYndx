@@ -2,6 +2,7 @@ import os
 import requests
 import io
 import openpyxl
+import re
 
 TOKENS_DIR = "tokens"
 if not os.path.exists(TOKENS_DIR):
@@ -40,16 +41,6 @@ def get_user_token(user_id):
             return f.read().strip()
     except Exception:
         return None
-
-def save_to_yadisk(user_id, text):
-    token = get_user_token(user_id)
-    if not token:
-        raise Exception("User not authenticated")
-    file_name = f"{user_id}.xlsx"
-    remote_path = f"app:/{file_name}"
-
-    # 1. Парсим строку text: "301 рубль 50 копеек мороженое"
-  import re
 
 def parse_expense(text):
     """
@@ -124,6 +115,16 @@ def parse_expense(text):
     # Если только число без категории или не найдено ничего осмысленного
     return None, None
 
+def save_to_yadisk(user_id, text):
+    token = get_user_token(user_id)
+    if not token:
+        raise Exception("User not authenticated")
+    file_name = f"{user_id}.xlsx"
+    remote_path = f"app:/{file_name}"
+
+    amount, category = parse_expense(text)
+    if amount is None or category is None:
+        raise Exception("Некорректный формат расходов. Пожалуйста, попробуйте ещё раз.")
 
     # 2. Скачиваем существующий excel (если есть)
     headers = {"Authorization": f"OAuth {token}"}
