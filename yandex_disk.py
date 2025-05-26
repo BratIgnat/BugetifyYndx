@@ -44,75 +44,64 @@ def get_user_token(user_id):
 
 def parse_expense(text):
     """
-    Универсальный парсер строки "1000 рублей 41 копейка проезд" → 1000.41, "проезд"
-    Работает для любого порядка слов: сумма до/после категории, с/без валюты/копеек.
+    Парсит строку типа '200 р 53 к кукуруза', 'подушка 750 р 42 к', '350 к вода', 'молоко 28 рублей' и др.
+    Возвращает (float сумма, категория) или (None, None)
     """
 
-    text = text.lower().strip()
-    text = re.sub(r'\s+', ' ', text)
+    # Унификация: заменить длинные слова, убрать двойные пробелы и привести к нижнему регистру
+    text = text.lower()
+    text = text.replace("рублей", "р").replace("рубль", "р").replace("руб", "р")
+    text = text.replace("копеек", "к").replace("копейки", "к").replace("копейка", "к").replace("коп", "к")
+    text = text.replace(",", ".")
+    text = re.sub(r"\s+", " ", text).strip()
 
-    # Шаблоны для суммы в начале или в конце
-    # Пример: "1000 рублей 41 копейка такси" или "такси 1000 рублей 41 копейка"
-    pattern = r"""
-        (?P<cat1>.*?)            # категория (может быть пустой)
-        \s*
-        (?P<thousands>\d+)\s*тысяч[а-я]*\s* # "2 тысячи" вариант
-        (?:(?P<rub>\d+)\s*руб(?:лей|ль)?)? # рубли (опционально)
-        (?:\s*(?P<kop>\d{1,2})\s*коп(?:еек|ейки)?)? # копейки (опционально)
-        (?P<cat2>.*)              # категория в конце (может быть пустой)
-        |                         # Либо просто рубли/копейки без "тысячи"
-        (?P<cat3>.*?)             # категория (может быть пустой)
-        (?P<rub2>\d+)\s*руб(?:лей|ль)? # "100 рублей"
-        (?:\s*(?P<kop2>\d{1,2})\s*коп(?:еек|ейки)?)? # "50 копеек" (опционально)
-        (?P<cat4>.*)              # категория (может быть пустой)
-        |                         # Или просто число + текст
-        (?P<cat5>.*?)             # категория (может быть пустой)
-        (?P<num>\d+(?:[.,]\d{1,2})?) # просто число
-        (?P<cat6>.*)
-    """
-
-    regex = re.compile(pattern, re.VERBOSE)
-    match = regex.match(text)
-
-    # 1. Вариант "2 тысячи 100 рублей 41 копейка такси"
-    if match and match.group("thousands"):
-        rub = int(match.group("thousands")) * 1000
-        if match.group("rub"):
-            rub += int(match.group("rub"))
+    # Вариант 1: сумма в начале ("200 р 53 к кукуруза")
+    match = re.match(r"(?P<rub>\d+)\s*р?\s*(?P<kop>\d{1,2})?\s*к?\s*(?P<cat>.+)", text)
+    if match:
+        rub = int(match.group("rub"))
         kop = int(match.group("kop") or 0)
-        category = f"{match.group('cat1').strip()} {match.group('cat2').strip()}".strip()
-        return rub + kop / 100, category
+        amount = rub + kop / 100
+        category = match.group("cat").strip()
+        return amount, category
 
-    # 2. Вариант "100 рублей 41 копейка такси" или "такси 100 рублей 41 копейка"
-    if match and match.group("rub2"):
-        rub = int(match.group("rub2"))
-        kop = int(match.group("kop2") or 0)
-        category = f"{match.group('cat3').strip()} {match.group('cat4').strip()}".strip()
-        return rub + kop / 100, category
+    # Вариант 2: категория в начале ("подушка 750 р 42 к", "молоко 28 р", "молоко 28")
+    match = re.match(r"(?P<cat>.+?)\s+(?P<rub>\d+)\s*р?\s*(?P<kop>\d{1,2})?\s*к?$", text)
+    if match:
+        rub = int(match.group("rub"))
+        kop = int(match.group("kop") or 0)
+        amount = rub + kop / 100
+        category = match.group("cat").strip()
+        return amount, category
 
-    # 3. Вариант "1000 такси" или "такси 1000"
-    if match and match.group("num"):
+    # Вариант 3: только копейки ("50 к мороженое")
+    match = re.match(r"(?P<kop>\d{1,2})\s*к\s*(?P<cat>.+)", text)
+    if match:
+        kop = int(match.group("kop"))
+        amount = kop / 100
+        category = match.group("cat").strip()
+        return amount, category
+
+    # Вариант 4: просто число и категория ("301 мороженое" или "мороженое 301")
+    match = re.match(r"(\d+(?:[.,]\d{1,2})?)\s+(.+)", text)
+    if match:
         try:
-            rub = float(match.group("num").replace(',', '.'))
-        except:
-            rub = 0
-        category = f"{match.group('cat5').strip()} {match.group('cat6').strip()}".strip()
-        return rub, category
+            amount = float(match.group(1).replace(',', '.'))
+        except Exception:
+            amount = None
+        category = match.group(2).strip()
+        if amount is not None:
+            return amount, category
 
-    # 4. Если совсем ничего не найдено — попытаться по простому шаблону
-    m = re.match(r"(\d+(?:[.,]\d{1,2})?)\s+(.+)", text)
-    if m:
-        rub = float(m.group(1).replace(',', '.'))
-        category = m.group(2).strip()
-        return rub, category
+    match = re.match(r"(.+?)\s+(\d+(?:[.,]\d{1,2})?)$", text)
+    if match:
+        category = match.group(1).strip()
+        try:
+            amount = float(match.group(2).replace(',', '.'))
+        except Exception:
+            amount = None
+        if amount is not None:
+            return amount, category
 
-    m = re.match(r"(.+?)\s+(\d+(?:[.,]\d{1,2})?)$", text)
-    if m:
-        category = m.group(1).strip()
-        rub = float(m.group(2).replace(',', '.'))
-        return rub, category
-
-    # Если только число без категории или не найдено ничего осмысленного
     return None, None
 
 def save_to_yadisk(user_id, text):
@@ -123,7 +112,7 @@ def save_to_yadisk(user_id, text):
     remote_path = f"app:/{file_name}"
 
     amount, category = parse_expense(text)
-    if amount is None or category is None:
+    if amount is None or category is None or category == "":
         raise Exception("Некорректный формат расходов. Пожалуйста, попробуйте ещё раз.")
 
     # 2. Скачиваем существующий excel (если есть)
