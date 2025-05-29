@@ -42,42 +42,39 @@ def get_user_token(user_id):
     except Exception:
         return None
 
-import re
-
 def parse_expense(text):
     """
-    Извлекает сумму из текста (удаляет все формы 'руб', 'р', 'коп', 'к'), возвращает (сумма: float, категория: str).
-    Примеры:
-    - '1000 р такси' -> (1000.0, 'такси')
-    - '50 рублей 30 копеек еда' -> (50.3, 'еда')
-    - '25000 аренда' -> (25000.0, 'аренда')
-    - '99 копеек' -> (0.99, '')
+    Корректно разбирает строки типа 'подушка 750 рублей 42 копейки' → (750.42, 'подушка')
+    Работает и с '1000 р еда' → (1000.0, 'еда'), и с 'еда 1000 р' → (1000.0, 'еда')
     """
+    original_text = text.lower()
 
-    text = text.lower()
-    # Удалить все валютные слова (любыми формами)
-    text_clean = re.sub(r"\b(руб(ль|лей|ля|ли|лем|лям|лями)?|р|коп(ейка|ейки|еек|ейку|ейкой|ейками)?|к)\b", "", text)
-    text_clean = re.sub(r"\s+", " ", text_clean).strip()
+    # Для парсинга чисел (с копейками) ищем все числа и валюты
+    pattern = r"(\d+[.,]?\d*)\s*(руб(ль|лей|ля|ли|лем|лям|лями)?|р)?(\s*\d{1,2}\s*(коп(ейка|ейки|еек|ейку|ейкой|ейками)?|к)?)?"
+    matches = list(re.finditer(pattern, original_text, flags=re.IGNORECASE))
     
-    # Сначала ищем пары "число число" (пример: 100 30 -> 100.30)
-    matches = re.findall(r"\d+", text_clean)
     amount = 0.0
-    if len(matches) >= 2 and int(matches[1]) < 100:
-        amount = float(matches[0]) + float(matches[1]) / 100
-        # Остальное после второй цифры — категория
-        category_start = text_clean.find(matches[1]) + len(matches[1])
-        category = text_clean[category_start:].strip()
-        return amount, category
-
-    # Если есть только одно число — это сумма
-    if len(matches) >= 1:
-        amount = float(matches[0])
-        category_start = text_clean.find(matches[0]) + len(matches[0])
-        category = text_clean[category_start:].strip()
-        return amount, category
-
-    # Не найдено ни одного числа
-    return 0.0, text_clean
+    if matches:
+        for match in matches:
+            if match:
+                # Извлекаем рубли и копейки
+                rub = match.group(1)
+                kop = None
+                if match.group(4):
+                    # Второе число (копейки)
+                    kop_match = re.search(r"\d{1,2}", match.group(4))
+                    if kop_match:
+                        kop = kop_match.group(0)
+                if kop:
+                    amount = float(rub) + float(kop)/100
+                else:
+                    amount = float(rub)
+                # Вырезаем эту сумму с валютой из текста
+                text_wo_amount = original_text.replace(match.group(0), "")
+                category = re.sub(r"\s+", " ", text_wo_amount).strip()
+                return amount, category
+    # Если не найдено суммы — возвращаем 0 и весь текст как категорию
+    return 0.0, original_text.strip()
 
 def save_to_yadisk(user_id, text):
     token = get_user_token(user_id)
