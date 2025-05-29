@@ -3,7 +3,7 @@ import logging
 from aiogram import Bot, Dispatcher, types, executor
 from dotenv import load_dotenv
 from speechkit import speech_to_text
-from yandex_disk import save_to_yadisk, is_user_authenticated, get_auth_link, set_auth_code
+from yandex_disk import save_to_yadisk, is_user_authenticated, get_auth_link, set_auth_code, ExpenseParseError
 
 load_dotenv()
 
@@ -60,6 +60,9 @@ async def handle_voice(message: types.Message):
         await message.reply(f"📝 Распознано:\n{text}")
         save_to_yadisk(user_id, text)
         await message.reply("✅ Расход сохранён и отправлен на ваш Яндекс.Диск!")
+    except ExpenseParseError as e:
+        logging.warning(f"ExpenseParseError: {e}")
+        await message.reply(f"⚠️ {str(e)}")
     except Exception as e:
         logging.error(f"Ошибка при обработке голоса: {e}")
         await message.reply("⚠️ Ошибка при обработке голосового сообщения.")
