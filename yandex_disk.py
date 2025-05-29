@@ -44,53 +44,40 @@ def get_user_token(user_id):
 
 import re
 
-import re
-
 def parse_expense(text):
     """
-    Извлекает сумму из текста, полностью удаляя слова 'рубль', 'руб', 'р', 'копейка', 'коп', 'к' и все их формы/падежи.
-    Всегда возвращает float (например: '50 тысяч рублей 43 копейки' -> 50043.0).
+    Извлекает сумму из текста (удаляет все формы 'руб', 'р', 'коп', 'к'), возвращает (сумма: float, категория: str).
+    Примеры:
+    - '1000 р такси' -> (1000.0, 'такси')
+    - '50 рублей 30 копеек еда' -> (50.3, 'еда')
+    - '25000 аренда' -> (25000.0, 'аренда')
+    - '99 копеек' -> (0.99, '')
     """
 
-    # 1. Привести к нижнему регистру и убрать все валютные слова
-    clean_text = text.lower()
-    # Список всех возможных форм рубля и копейки (регулярки по границе слова)
-    currency_words = [
-        r"\bруб(ль|лей|ля|ли|лям|лями|лем|лю|.)?\b",    # любые формы "рубль"
-        r"\bр\b",                                       # отдельное "р"
-        r"\bкоп(ейка|ейки|еек|ейку|ейкой|ейками|ейки|.)?\b", # любые формы "копейка"
-        r"\bк\b",                                       # отдельное "к"
-    ]
-    for word_pattern in currency_words:
-        clean_text = re.sub(word_pattern, " ", clean_text, flags=re.IGNORECASE)
+    text = text.lower()
+    # Удалить все валютные слова (любыми формами)
+    text_clean = re.sub(r"\b(руб(ль|лей|ля|ли|лем|лям|лями)?|р|коп(ейка|ейки|еек|ейку|ейкой|ейками)?|к)\b", "", text)
+    text_clean = re.sub(r"\s+", " ", text_clean).strip()
     
-    # 2. Убрать лишние пробелы
-    clean_text = re.sub(r"\s+", " ", clean_text).strip()
+    # Сначала ищем пары "число число" (пример: 100 30 -> 100.30)
+    matches = re.findall(r"\d+", text_clean)
+    amount = 0.0
+    if len(matches) >= 2 and int(matches[1]) < 100:
+        amount = float(matches[0]) + float(matches[1]) / 100
+        # Остальное после второй цифры — категория
+        category_start = text_clean.find(matches[1]) + len(matches[1])
+        category = text_clean[category_start:].strip()
+        return amount, category
 
-    # 3. Поиск суммы (ищем числа, в том числе формата 50 тысяч 43)
-    # Заменяем слова "тысяч", "тысяча" и пр. на 000
-    clean_text = re.sub(r"\b(тысяч[аи]?|тыс)\b", "000", clean_text)
-    clean_text = re.sub(r"\b(миллион[а-я]*)\b", "000000", clean_text)
-    clean_text = re.sub(r"\b(миллиард[а-я]*)\b", "000000000", clean_text)
+    # Если есть только одно число — это сумма
+    if len(matches) >= 1:
+        amount = float(matches[0])
+        category_start = text_clean.find(matches[0]) + len(matches[0])
+        category = text_clean[category_start:].strip()
+        return amount, category
 
-    # Извлекаем все числа
-    numbers = re.findall(r"\d+", clean_text)
-    if not numbers:
-        return 0.0  # Если ничего не найдено
-
-    # Склеиваем числа (напр. "50 000 43" -> 50043), либо берем по логике твоего проекта
-    # Тут можно настроить свою логику: например, если обычно "43" — это копейки,
-    # то можно вернуть float(рубли) + float(копейки)/100
-    # Если всё число склеено — возвращаем как есть
-    if len(numbers) == 1:
-        return float(numbers[0])
-
-    # Классика для русского ввода: "50 43" = 50 руб 43 коп
-    if len(numbers) == 2 and int(numbers[1]) < 100:
-        return float(numbers[0]) + float(numbers[1]) / 100
-
-    # В противном случае просто объединяем числа (50 000 43 -> 50043)
-    return float(''.join(numbers))
+    # Не найдено ни одного числа
+    return 0.0, text_clean
 
 def save_to_yadisk(user_id, text):
     token = get_user_token(user_id)
