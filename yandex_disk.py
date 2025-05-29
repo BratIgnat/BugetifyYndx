@@ -42,66 +42,80 @@ def get_user_token(user_id):
     except Exception:
         return None
 
+import re
+
 def parse_expense(text):
     """
-    Парсит строку типа '200 р 53 к кукуруза', 'подушка 750 р 42 к', '350 к вода', 'молоко 28 рублей' и др.
-    Возвращает (float сумма, категория) или (None, None)
+    Парсит строку с суммой и категорией. Удаляет все валюты ('руб', 'р', 'коп', 'к').
+    Возвращает (float, категория) либо (None, None).
     """
+    text = text.lower().strip()
+    text = re.sub(r'\s+', ' ', text)
 
-    # Унификация: заменить длинные слова, убрать двойные пробелы и привести к нижнему регистру
-    text = text.lower()
-    text = text.replace("рублей", "р").replace("рубль", "р").replace("руб", "р")
-    text = text.replace("копеек", "к").replace("копейки", "к").replace("копейка", "к").replace("коп", "к")
-    text = text.replace(",", ".")
-    text = re.sub(r"\s+", " ", text).strip()
+    # 1. Найти сумму с копейками: 1000 рублей 41 копейка проезд / 350 48 к вода
+    money_pattern = (
+        r'(?P<amount>\d+[.,]?\d*)'                       # сумма (целое/дробное)
+        r'(?:\s*(?:руб(?:ль|лей|ля)?|р)\b)?'             # слово "рубль" (необязательно)
+        r'(?:\s*(?P<kop>\d{1,2})\s*(?:коп(?:ейка|еек|ейки)?|к)\b)?' # "копейки" (опц)
+        r'(?:\s+)?(?P<category>.+)?'                     # категория (всё остальное)
+    )
 
-    # Вариант 1: сумма в начале ("200 р 53 к кукуруза")
-    match = re.match(r"(?P<rub>\d+)\s*р?\s*(?P<kop>\d{1,2})?\s*к?\s*(?P<cat>.+)", text)
-    if match:
-        rub = int(match.group("rub"))
-        kop = int(match.group("kop") or 0)
-        amount = rub + kop / 100
-        category = match.group("cat").strip()
-        return amount, category
-
-    # Вариант 2: категория в начале ("подушка 750 р 42 к", "молоко 28 р", "молоко 28")
-    match = re.match(r"(?P<cat>.+?)\s+(?P<rub>\d+)\s*р?\s*(?P<kop>\d{1,2})?\s*к?$", text)
-    if match:
-        rub = int(match.group("rub"))
-        kop = int(match.group("kop") or 0)
-        amount = rub + kop / 100
-        category = match.group("cat").strip()
-        return amount, category
-
-    # Вариант 3: только копейки ("50 к мороженое")
-    match = re.match(r"(?P<kop>\d{1,2})\s*к\s*(?P<cat>.+)", text)
-    if match:
-        kop = int(match.group("kop"))
-        amount = kop / 100
-        category = match.group("cat").strip()
-        return amount, category
-
-    # Вариант 4: просто число и категория ("301 мороженое" или "мороженое 301")
-    match = re.match(r"(\d+(?:[.,]\d{1,2})?)\s+(.+)", text)
-    if match:
-        try:
-            amount = float(match.group(1).replace(',', '.'))
-        except Exception:
-            amount = None
-        category = match.group(2).strip()
-        if amount is not None:
-            return amount, category
-
-    match = re.match(r"(.+?)\s+(\d+(?:[.,]\d{1,2})?)$", text)
+    # 2. Попробовать "Категория СУММА КОПЕЙКИ"
+    match = re.match(r'^(.+?)\s+(\d+[.,]?\d*)(?:\s*(?:руб(?:ль|лей|ля)?|р))?(?:\s*(\d{1,2})\s*(?:коп(?:ейка|еек|ейки)?|к))?$', text)
     if match:
         category = match.group(1).strip()
+        rub = match.group(2).replace(',', '.')
+        kop = match.group(3) or '0'
         try:
-            amount = float(match.group(2).replace(',', '.'))
+            amount = float(rub) + float(kop)/100
         except Exception:
-            amount = None
-        if amount is not None:
-            return amount, category
+            return None, None
+        if not category or category in ['рубль', 'рублей', 'р', 'копейка', 'копеек', 'к']:
+            return None, None
+        return amount, category
 
+    # 3. Попробовать "СУММА КОПЕЙКИ Категория"
+    match = re.match(money_pattern, text)
+    if match:
+        rub = match.group('amount').replace(',', '.')
+        kop = match.group('kop') or '0'
+        category = (match.group('category') or '').strip()
+        try:
+            amount = float(rub) + float(kop)/100
+        except Exception:
+            return None, None
+        # Если нет категории — ошибка
+        if not category or category in ['рубль', 'рублей', 'р', 'копейка', 'копеек', 'к']:
+            return None, None
+        return amount, category
+
+    # 4. Попробовать просто "СУММА Категория"
+    match = re.match(r'^(\d+[.,]?\d*)\s+(.+)$', text)
+    if match:
+        rub = match.group(1).replace(',', '.')
+        category = match.group(2).strip()
+        try:
+            amount = float(rub)
+        except Exception:
+            return None, None
+        if not category or category in ['рубль', 'рублей', 'р', 'копейка', 'копеек', 'к']:
+            return None, None
+        return amount, category
+
+    # 5. Попробовать "Категория СУММА"
+    match = re.match(r'^(.+?)\s+(\d+[.,]?\d*)$', text)
+    if match:
+        category = match.group(1).strip()
+        rub = match.group(2).replace(',', '.')
+        try:
+            amount = float(rub)
+        except Exception:
+            return None, None
+        if not category or category in ['рубль', 'рублей', 'р', 'копейка', 'копеек', 'к']:
+            return None, None
+        return amount, category
+
+    # 6. Ничего не распознано или сумма/категория некорректна
     return None, None
 
 def save_to_yadisk(user_id, text):
