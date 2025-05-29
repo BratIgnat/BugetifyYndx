@@ -8,6 +8,10 @@ TOKENS_DIR = "tokens"
 if not os.path.exists(TOKENS_DIR):
     os.makedirs(TOKENS_DIR)
 
+class ExpenseParseError(Exception):
+    """Кастомное исключение для ошибок парсинга и валидации расходов."""
+    pass
+
 def get_auth_link(user_id):
     client_id = os.getenv("YANDEX_CLIENT_ID")
     return (
@@ -77,15 +81,24 @@ def parse_expense(text):
     return 0.0, original_text.strip()
 
 def save_to_yadisk(user_id, text):
+    # Универсальная валидация
+    if not text or not text.strip():
+        raise ExpenseParseError("Сообщение не распознано. Пожалуйста, повторите запись.")
+    amount, category = parse_expense(text)
+    # Категория может быть пустой только если реально нет ни одного слова кроме суммы!
+    # Обычно надо хотя бы два поля (и сумма, и категория)
+    if amount == 0.0 and not category:
+        raise ExpenseParseError("Не удалось определить сумму и категорию. Пожалуйста, повторите запись.")
+    if amount == 0.0:
+        raise ExpenseParseError("Не удалось определить сумму. Пожалуйста, повторите запись.")
+    if not category:
+        raise ExpenseParseError("Не удалось определить категорию. Пожалуйста, повторите запись.")
+
     token = get_user_token(user_id)
     if not token:
         raise Exception("User not authenticated")
     file_name = f"{user_id}.xlsx"
     remote_path = f"app:/{file_name}"
-
-    amount, category = parse_expense(text)
-    if amount is None or category is None or category == "":
-        raise Exception("Некорректный формат расходов. Пожалуйста, попробуйте ещё раз.")
 
     # 2. Скачиваем существующий excel (если есть)
     headers = {"Authorization": f"OAuth {token}"}
