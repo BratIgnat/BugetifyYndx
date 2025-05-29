@@ -44,79 +44,53 @@ def get_user_token(user_id):
 
 import re
 
+import re
+
 def parse_expense(text):
     """
-    Парсит строку с суммой и категорией. Удаляет все валюты ('руб', 'р', 'коп', 'к').
-    Возвращает (float, категория) либо (None, None).
+    Извлекает сумму из текста, полностью удаляя слова 'рубль', 'руб', 'р', 'копейка', 'коп', 'к' и все их формы/падежи.
+    Всегда возвращает float (например: '50 тысяч рублей 43 копейки' -> 50043.0).
     """
-    text = text.lower().strip()
-    text = re.sub(r'\s+', ' ', text)
 
-    # 1. Найти сумму с копейками: 1000 рублей 41 копейка проезд / 350 48 к вода
-    money_pattern = (
-        r'(?P<amount>\d+[.,]?\d*)'                       # сумма (целое/дробное)
-        r'(?:\s*(?:руб(?:ль|лей|ля)?|р)\b)?'             # слово "рубль" (необязательно)
-        r'(?:\s*(?P<kop>\d{1,2})\s*(?:коп(?:ейка|еек|ейки)?|к)\b)?' # "копейки" (опц)
-        r'(?:\s+)?(?P<category>.+)?'                     # категория (всё остальное)
-    )
+    # 1. Привести к нижнему регистру и убрать все валютные слова
+    clean_text = text.lower()
+    # Список всех возможных форм рубля и копейки (регулярки по границе слова)
+    currency_words = [
+        r"\bруб(ль|лей|ля|ли|лям|лями|лем|лю|.)?\b",    # любые формы "рубль"
+        r"\bр\b",                                       # отдельное "р"
+        r"\bкоп(ейка|ейки|еек|ейку|ейкой|ейками|ейки|.)?\b", # любые формы "копейка"
+        r"\bк\b",                                       # отдельное "к"
+    ]
+    for word_pattern in currency_words:
+        clean_text = re.sub(word_pattern, " ", clean_text, flags=re.IGNORECASE)
+    
+    # 2. Убрать лишние пробелы
+    clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
-    # 2. Попробовать "Категория СУММА КОПЕЙКИ"
-    match = re.match(r'^(.+?)\s+(\d+[.,]?\d*)(?:\s*(?:руб(?:ль|лей|ля)?|р))?(?:\s*(\d{1,2})\s*(?:коп(?:ейка|еек|ейки)?|к))?$', text)
-    if match:
-        category = match.group(1).strip()
-        rub = match.group(2).replace(',', '.')
-        kop = match.group(3) or '0'
-        try:
-            amount = float(rub) + float(kop)/100
-        except Exception:
-            return None, None
-        if not category or category in ['рубль', 'рублей', 'р', 'копейка', 'копеек', 'к']:
-            return None, None
-        return amount, category
+    # 3. Поиск суммы (ищем числа, в том числе формата 50 тысяч 43)
+    # Заменяем слова "тысяч", "тысяча" и пр. на 000
+    clean_text = re.sub(r"\b(тысяч[аи]?|тыс)\b", "000", clean_text)
+    clean_text = re.sub(r"\b(миллион[а-я]*)\b", "000000", clean_text)
+    clean_text = re.sub(r"\b(миллиард[а-я]*)\b", "000000000", clean_text)
 
-    # 3. Попробовать "СУММА КОПЕЙКИ Категория"
-    match = re.match(money_pattern, text)
-    if match:
-        rub = match.group('amount').replace(',', '.')
-        kop = match.group('kop') or '0'
-        category = (match.group('category') or '').strip()
-        try:
-            amount = float(rub) + float(kop)/100
-        except Exception:
-            return None, None
-        # Если нет категории — ошибка
-        if not category or category in ['рубль', 'рублей', 'р', 'копейка', 'копеек', 'к']:
-            return None, None
-        return amount, category
+    # Извлекаем все числа
+    numbers = re.findall(r"\d+", clean_text)
+    if not numbers:
+        return 0.0  # Если ничего не найдено
 
-    # 4. Попробовать просто "СУММА Категория"
-    match = re.match(r'^(\d+[.,]?\d*)\s+(.+)$', text)
-    if match:
-        rub = match.group(1).replace(',', '.')
-        category = match.group(2).strip()
-        try:
-            amount = float(rub)
-        except Exception:
-            return None, None
-        if not category or category in ['рубль', 'рублей', 'р', 'копейка', 'копеек', 'к']:
-            return None, None
-        return amount, category
+    # Склеиваем числа (напр. "50 000 43" -> 50043), либо берем по логике твоего проекта
+    # Тут можно настроить свою логику: например, если обычно "43" — это копейки,
+    # то можно вернуть float(рубли) + float(копейки)/100
+    # Если всё число склеено — возвращаем как есть
+    if len(numbers) == 1:
+        return float(numbers[0])
 
-    # 5. Попробовать "Категория СУММА"
-    match = re.match(r'^(.+?)\s+(\d+[.,]?\d*)$', text)
-    if match:
-        category = match.group(1).strip()
-        rub = match.group(2).replace(',', '.')
-        try:
-            amount = float(rub)
-        except Exception:
-            return None, None
-        if not category or category in ['рубль', 'рублей', 'р', 'копейка', 'копеек', 'к']:
-            return None, None
-        return amount, category
+    # Классика для русского ввода: "50 43" = 50 руб 43 коп
+    if len(numbers) == 2 and int(numbers[1]) < 100:
+        return float(numbers[0]) + float(numbers[1]) / 100
 
-    # 6. Ничего не распознано или сумма/категория некорректна
-    return None, None
+    # В противном случае просто объединяем числа (50 000 43 -> 50043)
+    return float(''.join(numbers))
 
 def save_to_yadisk(user_id, text):
     token = get_user_token(user_id)
