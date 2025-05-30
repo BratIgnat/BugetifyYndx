@@ -4,7 +4,7 @@ import io
 import openpyxl
 import re
 from datetime import datetime
- 
+
 TOKENS_DIR = "tokens"
 if not os.path.exists(TOKENS_DIR):
     os.makedirs(TOKENS_DIR)
@@ -82,8 +82,8 @@ def parse_expense(text):
     return 0.0, original_text.strip()
 
 def save_to_yadisk(user_id, text, message_date=None):
- print(f"[DEBUG] datetime = {datetime}")
- token = get_user_token(user_id)
+    print(f"[DEBUG] datetime = {datetime}")
+    token = get_user_token(user_id)
     if not token:
         raise Exception("User not authenticated")
     file_name = f"{user_id}.xlsx"
