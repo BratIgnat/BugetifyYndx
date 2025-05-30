@@ -58,7 +58,7 @@ async def handle_voice(message: types.Message):
     try:
         text = speech_to_text(ogg_bytes)
         await message.reply(f"📝 Распознано:\n{text}")
-        save_to_yadisk(user_id, text)
+        save_to_yadisk(user_id, text, message_date=int(message.date.timestamp()))
         await message.reply("✅ Расход сохранён и отправлен на ваш Яндекс.Диск!")
     except ExpenseParseError as e:
         logging.warning(f"ExpenseParseError: {e}")
