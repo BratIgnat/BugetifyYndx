@@ -80,25 +80,16 @@ def parse_expense(text):
     # Если не найдено суммы — возвращаем 0 и весь текст как категорию
     return 0.0, original_text.strip()
 
-def save_to_yadisk(user_id, text):
-    # Универсальная валидация
-    if not text or not text.strip():
-        raise ExpenseParseError("🔇Сообщение не распознано. Пожалуйста, повторите запись.")
-    amount, category = parse_expense(text)
-    # Категория может быть пустой только если реально нет ни одного слова кроме суммы!
-    # Обычно надо хотя бы два поля (и сумма, и категория)
-    if amount == 0.0 and not category:
-        raise ExpenseParseError("❔Не удалось определить сумму и категорию. Пожалуйста, повторите запись.")
-    if amount == 0.0:
-        raise ExpenseParseError("💸Не удалось определить сумму. Пожалуйста, повторите запись.")
-    if not category:
-        raise ExpenseParseError("🏷️Не удалось определить категорию. Пожалуйста, повторите запись.")
-
+def save_to_yadisk(user_id, text, message_date=None):
     token = get_user_token(user_id)
     if not token:
         raise Exception("User not authenticated")
     file_name = f"{user_id}.xlsx"
     remote_path = f"app:/{file_name}"
+
+    amount, category = parse_expense(text)
+    if amount is None or category is None:
+        raise Exception("Некорректный формат расходов. Пожалуйста, попробуйте ещё раз.")
 
     # 2. Скачиваем существующий excel (если есть)
     headers = {"Authorization": f"OAuth {token}"}
@@ -111,13 +102,22 @@ def save_to_yadisk(user_id, text):
         file_content = requests.get(download_href).content
         workbook = openpyxl.load_workbook(io.BytesIO(file_content))
         sheet = workbook.active
+        # Если старый файл — добавь столбец если нужно (миграция)
+        if sheet.max_row == 1 and sheet.max_column == 3:
+            sheet.cell(row=1, column=4).value = "Дата и время"
     else:
         workbook = openpyxl.Workbook()
         sheet = workbook.active
-        sheet.append(["#", "Сумма", "Категория"])
+        sheet.append(["#", "Сумма", "Категория", "Дата и время"])
 
     idx = sheet.max_row
-    sheet.append([idx, amount, category])
+    # timestamp: используем message_date или текущее время сервера
+    if message_date:
+        dt = datetime.fromtimestamp(message_date)  # message_date из Telegram — это unix timestamp (int)
+    else:
+        dt = datetime.now()
+    dt_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+    sheet.append([idx, amount, category, dt_str])
 
     # 3. Сохраняем excel-файл в память
     output = io.BytesIO()
