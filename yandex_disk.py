@@ -3,11 +3,16 @@ import requests
 import io
 import openpyxl
 import re
+import json
 from datetime import datetime
+import pytz
 
 TOKENS_DIR = "tokens"
+SETTINGS_DIR = "user_settings"
 if not os.path.exists(TOKENS_DIR):
     os.makedirs(TOKENS_DIR)
+if not os.path.exists(SETTINGS_DIR):
+    os.makedirs(SETTINGS_DIR)
 
 class ExpenseParseError(Exception):
     """Кастомное исключение для ошибок парсинга и валидации расходов."""
@@ -53,8 +58,6 @@ def parse_expense(text):
     Работает и с '1000 р еда' → (1000.0, 'еда'), и с 'еда 1000 р' → (1000.0, 'еда')
     """
     original_text = text.lower()
-
-    # Для парсинга чисел (с копейками) ищем все числа и валюты
     pattern = r"(\d+[.,]?\d*)\s*(руб(ль|лей|ля|ли|лем|лям|лями)?|р)?(\s*\d{1,2}\s*(коп(ейка|ейки|еек|ейку|ейкой|ейками)?|к)?)?"
     matches = list(re.finditer(pattern, original_text, flags=re.IGNORECASE))
     
@@ -62,11 +65,9 @@ def parse_expense(text):
     if matches:
         for match in matches:
             if match:
-                # Извлекаем рубли и копейки
                 rub = match.group(1)
                 kop = None
                 if match.group(4):
-                    # Второе число (копейки)
                     kop_match = re.search(r"\d{1,2}", match.group(4))
                     if kop_match:
                         kop = kop_match.group(0)
@@ -74,15 +75,26 @@ def parse_expense(text):
                     amount = float(rub) + float(kop)/100
                 else:
                     amount = float(rub)
-                # Вырезаем эту сумму с валютой из текста
                 text_wo_amount = original_text.replace(match.group(0), "")
                 category = re.sub(r"\s+", " ", text_wo_amount).strip()
                 return amount, category
-    # Если не найдено суммы — возвращаем 0 и весь текст как категорию
     return 0.0, original_text.strip()
 
+def save_timezone(user_id, timezone_str):
+    path = f"{SETTINGS_DIR}/{user_id}.json"
+    with open(path, "w") as f:
+        json.dump({"timezone": timezone_str}, f)
+
+def get_timezone(user_id):
+    path = f"{SETTINGS_DIR}/{user_id}.json"
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+            return data.get("timezone", "UTC")
+    except:
+        return "UTC"
+
 def save_to_yadisk(user_id, text, message_date=None):
-    print(f"[DEBUG] datetime = {datetime}")
     token = get_user_token(user_id)
     if not token:
         raise Exception("User not authenticated")
@@ -93,7 +105,6 @@ def save_to_yadisk(user_id, text, message_date=None):
     if amount is None or category is None:
         raise Exception("Некорректный формат расходов. Пожалуйста, попробуйте ещё раз.")
 
-    # 2. Скачиваем существующий excel (если есть)
     headers = {"Authorization": f"OAuth {token}"}
     download_url = "https://cloud-api.yandex.net/v1/disk/resources/download"
     params_download = {"path": remote_path}
@@ -104,35 +115,40 @@ def save_to_yadisk(user_id, text, message_date=None):
         file_content = requests.get(download_href).content
         workbook = openpyxl.load_workbook(io.BytesIO(file_content))
         sheet = workbook.active
-        # Если старый файл — добавь столбец если нужно (миграция)
-        if sheet.max_row == 1 and sheet.max_column == 3:
-            sheet.cell(row=1, column=4).value = "Дата и время"
     else:
         workbook = openpyxl.Workbook()
         sheet = workbook.active
-        sheet.append(["#", "Сумма", "Категория", "Дата и время"])
+        sheet.append(["#", "Сумма", "Категория", "Дата/Время"])
+
+    # Гарантируем правильный заголовок
+    if sheet.max_column < 4 or (sheet.cell(row=1, column=4).value or "").strip().lower() not in ["дата/время", "дата и время"]:
+        sheet.cell(row=1, column=4).value = "Дата/Время"
 
     idx = sheet.max_row
-    # timestamp: используем message_date или текущее время сервера
+
+    user_tz_str = get_timezone(user_id)
+    try:
+        user_tz = pytz.timezone(user_tz_str)
+    except Exception:
+        user_tz = pytz.UTC
+
     if message_date:
-        dt = datetime.fromtimestamp(message_date)  # message_date из Telegram — это unix timestamp (int)
+        dt_utc = datetime.fromtimestamp(message_date, tz=pytz.UTC)
+        dt = dt_utc.astimezone(user_tz)
     else:
-        dt = datetime.now()
+        dt = datetime.now(user_tz)
     dt_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+
     sheet.append([idx, amount, category, dt_str])
 
-    # 3. Сохраняем excel-файл в память
     output = io.BytesIO()
     workbook.save(output)
     output.seek(0)
 
-    # 4. Получаем upload ссылку
     upload_url = "https://cloud-api.yandex.net/v1/disk/resources/upload"
     params = {"path": remote_path, "overwrite": "true"}
     r = requests.get(upload_url, params=params, headers=headers)
     href = r.json().get("href")
     if not href:
         raise Exception("Не удалось получить ссылку для загрузки файла на Яндекс.Диск.")
-
-    # 5. Загружаем обновлённый файл
     requests.put(href, data=output.getvalue())
