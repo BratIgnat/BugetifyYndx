@@ -102,6 +102,9 @@ async def handle_voice(message: types.Message):
     ogg_bytes = ogg_data.read()
     try:
         text = speech_to_text(ogg_bytes)
+        amount, category = parse_expense(text)
+        if amount is None or category is None:
+            raise ExpenseParseError("Сообщение должно содержать сумму и категорию. Пример: '100 рублей такси', '150 кефир'.")
         await message.reply(f"📝 Распознано:\n{text}")
         save_to_yadisk(user_id, text, message_date=int(message.date.timestamp()))
         await message.reply("✅ Расход сохранён и отправлен на ваш Яндекс.Диск!")
@@ -111,6 +114,3 @@ async def handle_voice(message: types.Message):
     except Exception as e:
         logging.error(f"Ошибка при обработке голоса: {e}")
         await message.reply("⚠️ Ошибка при обработке голосового сообщения.")
-
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
