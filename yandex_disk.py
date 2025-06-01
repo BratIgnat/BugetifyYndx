@@ -54,31 +54,38 @@ def get_user_token(user_id):
 
 def parse_expense(text):
     """
-    Корректно разбирает строки типа 'подушка 750 рублей 42 копейки' → (750.42, 'подушка')
-    Работает и с '1000 р еда' → (1000.0, 'еда'), и с 'еда 1000 р' → (1000.0, 'еда')
+    Возвращает (amount, category) если оба элемента есть и валидны, иначе (None, None)
     """
-    original_text = text.lower()
+    original_text = (text or "").lower().strip()
+    if not original_text:
+        return None, None
+
+    # Ищем сумму
     pattern = r"(\d+[.,]?\d*)\s*(руб(ль|лей|ля|ли|лем|лям|лями)?|р)?(\s*\d{1,2}\s*(коп(ейка|ейки|еек|ейку|ейкой|ейками)?|к)?)?"
     matches = list(re.finditer(pattern, original_text, flags=re.IGNORECASE))
-    
-    amount = 0.0
-    if matches:
-        for match in matches:
-            if match:
-                rub = match.group(1)
-                kop = None
-                if match.group(4):
-                    kop_match = re.search(r"\d{1,2}", match.group(4))
-                    if kop_match:
-                        kop = kop_match.group(0)
-                if kop:
-                    amount = float(rub) + float(kop)/100
-                else:
-                    amount = float(rub)
-                text_wo_amount = original_text.replace(match.group(0), "")
-                category = re.sub(r"\s+", " ", text_wo_amount).strip()
-                return amount, category
-    return 0.0, original_text.strip()
+    if not matches:
+        return None, None
+
+    for match in matches:
+        if match:
+            rub = match.group(1)
+            kop = None
+            if match.group(4):
+                kop_match = re.search(r"\d{1,2}", match.group(4))
+                if kop_match:
+                    kop = kop_match.group(0)
+            if kop:
+                amount = float(rub) + float(kop)/100
+            else:
+                amount = float(rub)
+            text_wo_amount = original_text.replace(match.group(0), "")
+            category = re.sub(r"\s+", " ", text_wo_amount).strip()
+            # Жёсткая проверка: и сумма, и категория должны быть!
+            if not category or not amount or category == "":
+                return None, None
+            return amount, category
+
+    return None, None
 
 def save_timezone(user_id, timezone_str):
     path = f"{SETTINGS_DIR}/{user_id}.json"
@@ -103,7 +110,7 @@ def save_to_yadisk(user_id, text, message_date=None):
 
     amount, category = parse_expense(text)
     if amount is None or category is None:
-        raise Exception("Некорректный формат расходов. Пожалуйста, попробуйте ещё раз.")
+        raise ExpenseParseError("Сообщение должно содержать сумму и категорию. Пример: '100 рублей такси', '150 кефир'.")
 
     headers = {"Authorization": f"OAuth {token}"}
     download_url = "https://cloud-api.yandex.net/v1/disk/resources/download"
@@ -120,7 +127,6 @@ def save_to_yadisk(user_id, text, message_date=None):
         sheet = workbook.active
         sheet.append(["#", "Сумма", "Категория", "Дата/Время"])
 
-    # Гарантируем правильный заголовок
     if sheet.max_column < 4 or (sheet.cell(row=1, column=4).value or "").strip().lower() not in ["дата/время", "дата и время"]:
         sheet.cell(row=1, column=4).value = "Дата/Время"
 
