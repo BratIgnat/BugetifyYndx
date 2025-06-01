@@ -78,10 +78,12 @@ async def handle_timezone_popular(message: types.Message):
 
 @dp.message_handler(lambda msg: msg.text == "Показать все таймзоны")
 async def handle_show_all_timezones(message: types.Message):
-    # Пагинация для всех поясов (по алфавиту)
-    all_timezones = sorted(list(pytz.all_timezones))
-    reply = "Список всех таймзон (скопируйте и отправьте одну из них):\n" + "\n".join(all_timezones)
-    await message.reply(reply, reply_markup=types.ReplyKeyboardRemove())
+    await message.reply(
+        "Полный список таймзон можно найти здесь:\n"
+        "https://en.wikipedia.org/wiki/List_of_tz_database_time_zones\n\n"
+        "Скопируйте и отправьте нужную таймзону сообщением.",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
 
 @dp.message_handler(lambda msg: msg.text in pytz.all_timezones)
 async def handle_timezone_text(message: types.Message):
